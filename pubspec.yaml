@@ -1,0 +1,8 @@
+name: rk_quic
+description: QUIC and WebTransport for Dart over a native library, so a Dart process can serve browser clients directly instead of waiting for HTTP/3 in the SDK.
+version: 0.0.1
+repository: https://github.com/kvgosu/telepos
+issue_tracker: https://github.com/kvgosu/telepos/issues
+
+environment:
+  sdk: ^3.8.0
