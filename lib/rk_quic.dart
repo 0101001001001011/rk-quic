@@ -41,6 +41,16 @@ import 'src/native_probe.dart';
 
 export 'src/loader.dart' show rkQuicAbiVersion, rkQuicLibraryPathVariable;
 export 'src/native_probe.dart' show NativeLoadOutcome, NativeProbe;
+export 'src/quic_event.dart'
+    show
+        DatagramReceived,
+        EndpointError,
+        QuicEvent,
+        SessionClosed,
+        SessionOpened,
+        StreamMessageReceived,
+        UnknownQuicEvent;
+export 'src/server.dart' show QuicServer, QuicServerConfig, QuicServerStart;
 export 'src/status.dart' show RkQuicStatus, RkQuicStatusName, statusFromWireName;
 
 /// Asks the native library which version it is and which ABI it speaks.

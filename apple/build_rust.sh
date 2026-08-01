@@ -21,6 +21,14 @@
 # NOT VERIFIED BY A BUILD. There is no Mac on this project. Everything above is
 # read off the tools; the file is here so the Apple path is a stated design
 # with a named failure mode rather than a blank.
+#
+# The likeliest failure is NOT any of the above. It is `aws-lc-sys`, which
+# builds C and needs CMake and a compiler it can find for the target. On
+# Android the same step works only once both CARGO_TARGET_<TRIPLE>_LINKER and
+# AR_<triple> are set — without the second, `cc-rs` looks for a tool named
+# `<triple>-ar` that the NDK does not ship, and the error names a program
+# rather than the missing variable. Expect the same shape here under different
+# names, and set them below rather than in someone's ~/.cargo/config.toml.
 
 set -eu
 

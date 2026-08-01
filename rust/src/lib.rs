@@ -1,18 +1,26 @@
 //! `rk_quic` — the native half.
 //!
-//! This crate is deliberately reachable in two steps. The first is an *empty*
-//! library: one function that returns a version string, no sockets, no files,
-//! no state. It exists so that a red build means the build pipeline is wrong
-//! and nothing else — anything that could fail for its own reasons would blur
-//! that answer. The transport is layered on top of it, not mixed into it.
+//! This crate was built in two steps, and the order is the point. The first
+//! step was an *empty* library: one function returning a version string, no
+//! sockets, no files, no state, so that a red build could only mean the build
+//! pipeline was wrong. Only once that was proved on Windows, Linux and Android
+//! did the transport go on top.
 //!
-//! The C ABI and its ownership rules live in [`ffi`]; the closed set of
-//! statuses lives in [`status`].
+//! [`ffi`] holds the C ABI and its ownership rules, [`status`] the closed set
+//! of statuses, [`transport`] the endpoint, and [`server_ffi`] the endpoint's
+//! entry points.
 
 #![deny(unsafe_op_in_unsafe_fn)]
 
+pub mod config;
+pub mod event;
 pub mod ffi;
+pub mod server_ffi;
 pub mod status;
+pub mod transport;
+
+#[cfg(test)]
+mod testing;
 
 use std::cell::RefCell;
 use std::ffi::c_char;

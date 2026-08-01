@@ -40,8 +40,26 @@ void main() {
           'rk_quic_version',
           'rk_quic_string_free',
           'rk_quic_last_error',
+          'rk_quic_server_start',
+          'rk_quic_server_stop',
+          'rk_quic_server_local_port',
+          'rk_quic_server_poll',
+          'rk_quic_session_send',
         }),
       );
+
+      // And the Dart bindings must look every one of them up. This is the
+      // direction that actually drifts: a function is added to the header and
+      // to Rust, and the Dart side is remembered a week later.
+      final bindings =
+          File('${_packageRoot()}/lib/src/bindings_io.dart').readAsStringSync();
+      for (final symbol in declared) {
+        expect(
+          bindings,
+          contains("'$symbol'"),
+          reason: '$symbol is in the header but nothing in Dart looks it up',
+        );
+      }
 
       // Every one of them must exist in Rust with #[no_mangle], or the header
       // is describing a library that does not exist.

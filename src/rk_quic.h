@@ -56,6 +56,67 @@ void rk_quic_string_free(char *s);
  * Ownership: the caller's. Free with rk_quic_string_free. */
 char *rk_quic_last_error(void);
 
+/* --- the endpoint ------------------------------------------------------- */
+
+/* Starts a QUIC/HTTP-3 endpoint serving WebTransport.
+ *
+ * config_json is UTF-8 JSON:
+ *   {
+ *     "bindAddress":         "0.0.0.0:4433",   // port 0 lets the OS choose
+ *     "certificateChainPem": "-----BEGIN CERTIFICATE-----…",
+ *     "privateKeyPem":       "-----BEGIN PRIVATE KEY-----…",  // PKCS#8
+ *     "path":                "/rk",            // optional, default "/rk"
+ *     "idleTimeoutMs":       30000             // optional, default 30000
+ *   }
+ * An unknown key is an error, not something ignored: a typo must not look
+ * like a setting that took effect.
+ *
+ * On "ok" the handle is written through out_handle. On anything else
+ * out_handle is untouched and rk_quic_last_error carries the detail.
+ *
+ * Ownership: nothing is transferred. The handle is a NAME, not a pointer —
+ * a stale one is "unknownHandle", never a use-after-free. */
+const char *rk_quic_server_start(const char *config_json, uint64_t *out_handle);
+
+/* Stops an endpoint and frees everything it owns. Stopping something already
+ * stopped is "notRunning", not a failure: during shutdown a double stop is
+ * ordinary, and making it an error only teaches callers to ignore the result. */
+const char *rk_quic_server_stop(uint64_t handle);
+
+/* Writes the port actually bound. Worth asking after "…:0". */
+const char *rk_quic_server_local_port(uint64_t handle, uint16_t *out_port);
+
+/* Waits up to timeout_ms for the next event and writes it as JSON.
+ *
+ * "ok"         — an event was written; the caller now owns *out_json.
+ * "wouldBlock" — the wait expired with nothing to report; *out_json is NULL.
+ *
+ * The two are distinct so a loop can tell "nothing happened" from "something
+ * happened and was handled".
+ *
+ * This is a queue with a reader, not polling: nothing is asked of the network,
+ * and an event arriving during the wait returns immediately. timeout_ms is
+ * capped at 60000 so a caller cannot park a thread for an hour.
+ *
+ * Ownership: on "ok" the caller owns *out_json and frees it with
+ * rk_quic_string_free. On any other status nothing was allocated.
+ *
+ * Event JSON carries a "kind" NAME — "sessionOpened", "sessionClosed",
+ * "datagram", "streamMessage", "endpointError" — never a number. */
+const char *rk_quic_server_poll(uint64_t handle, uint32_t timeout_ms,
+                                char **out_json);
+
+/* Sends UTF-8 to one session.
+ *
+ * reliable != 0 opens a unidirectional stream: ordered and retransmitted, for
+ * a change that must not be lost. reliable == 0 sends a datagram: neither, for
+ * the current value of something that will be sent again.
+ *
+ * "peerGone" means the session went away — a fact about the session rather
+ * than a fault, and the signal to stop writing to it. */
+const char *rk_quic_session_send(uint64_t handle, uint64_t session_id,
+                                 const char *payload_utf8, uint8_t reliable);
+
 #ifdef __cplusplus
 }
 #endif

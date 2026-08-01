@@ -14,8 +14,9 @@
 //!    [`rk_quic_string_free`]. Dart never calls `malloc`/`free` on memory
 //!    that crossed this boundary.
 
-use std::ffi::{c_char, CString};
+use std::ffi::{c_char, CStr, CString};
 use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::ptr;
 
 use crate::status::Status;
 
@@ -96,5 +97,35 @@ where
     match catch_unwind(AssertUnwindSafe(body)) {
         Ok(status) => status.as_c_str(),
         Err(_) => Status::Panic.as_c_str(),
+    }
+}
+
+/// Reads a borrowed C string, or `None` when it is null or not UTF-8.
+///
+/// # Safety
+/// `s` must be null or a valid NUL-terminated string that outlives the call.
+pub unsafe fn borrow_c_string<'a>(s: *const c_char) -> Option<&'a str> {
+    if s.is_null() {
+        return None;
+    }
+    // SAFETY: the caller promises a NUL-terminated string.
+    unsafe { CStr::from_ptr(s) }.to_str().ok()
+}
+
+/// Writes `value` through `out` when `out` is non-null.
+///
+/// A null out-pointer is accepted rather than refused: a caller that only
+/// wants the status should not have to invent somewhere to put a value it will
+/// not read.
+///
+/// # Safety
+/// `out` must be null or point to an aligned, writable `T`. Marked `unsafe`
+/// rather than hiding the null check behind a safe signature — clippy is right
+/// that a safe function which dereferences a caller's pointer is a lie, even
+/// when it checks for null first.
+pub unsafe fn write_out<T>(out: *mut T, value: T) {
+    if !out.is_null() {
+        // SAFETY: checked non-null; the caller promises an aligned, writable T.
+        unsafe { ptr::write(out, value) };
     }
 }
