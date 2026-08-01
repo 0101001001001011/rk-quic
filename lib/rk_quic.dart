@@ -51,7 +51,8 @@ export 'src/quic_event.dart'
         StreamMessageReceived,
         UnknownQuicEvent;
 export 'src/server.dart' show QuicServer, QuicServerConfig, QuicServerStart;
-export 'src/status.dart' show RkQuicStatus, RkQuicStatusName, statusFromWireName;
+export 'src/status.dart'
+    show RkQuicStatus, RkQuicStatusName, statusFromWireName;
 
 /// Asks the native library which version it is and which ABI it speaks.
 ///
@@ -64,11 +65,10 @@ export 'src/status.dart' show RkQuicStatus, RkQuicStatusName, statusFromWireName
 NativeProbe probeNativeLibrary({
   int? expectedAbiVersion,
   List<String>? candidatePaths,
-}) =>
-    loader.probeNativeLibrary(
-      expectedAbiVersion: expectedAbiVersion,
-      candidatePaths: candidatePaths,
-    );
+}) => loader.probeNativeLibrary(
+  expectedAbiVersion: expectedAbiVersion,
+  candidatePaths: candidatePaths,
+);
 
 /// The version **the loaded native library reports about itself**, or `null`
 /// when there is none to ask.

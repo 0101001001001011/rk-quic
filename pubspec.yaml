@@ -16,6 +16,9 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  # The same rule set the other eight rk_* packages analyse against, so that
+  # one CI job can hold all nine to one standard. See analysis_options.yaml.
+  lints: ^5.0.0
 
 flutter:
   plugin:

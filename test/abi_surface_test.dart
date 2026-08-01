@@ -18,19 +18,22 @@ import 'support/built_library.dart';
 /// it would have prevented is caught here instead, and the check also covers
 /// the Rust side, which ffigen would not have.
 void main() {
-  late final String header =
-      File('${_packageRoot()}/src/rk_quic.h').readAsStringSync();
-  late final String statusRs =
-      File('${_packageRoot()}/rust/src/status.rs').readAsStringSync();
-  late final String loaderDart =
-      File('${_packageRoot()}/lib/src/loader_io.dart').readAsStringSync();
+  late final String header = File(
+    '${_packageRoot()}/src/rk_quic.h',
+  ).readAsStringSync();
+  late final String statusRs = File(
+    '${_packageRoot()}/rust/src/status.rs',
+  ).readAsStringSync();
+  late final String loaderDart = File(
+    '${_packageRoot()}/lib/src/loader_io.dart',
+  ).readAsStringSync();
 
   group('the header and the Dart bindings name the same symbols', () {
     test('every function the header declares is looked up somewhere', () {
-      final declared = RegExp(r'\b(rk_quic_[a-z_]+)\s*\(', multiLine: true)
-          .allMatches(header)
-          .map((m) => m.group(1)!)
-          .toSet();
+      final declared = RegExp(
+        r'\b(rk_quic_[a-z_]+)\s*\(',
+        multiLine: true,
+      ).allMatches(header).map((m) => m.group(1)!).toSet();
 
       expect(declared, isNotEmpty, reason: 'the header parse found nothing');
       expect(
@@ -51,8 +54,9 @@ void main() {
       // And the Dart bindings must look every one of them up. This is the
       // direction that actually drifts: a function is added to the header and
       // to Rust, and the Dart side is remembered a week later.
-      final bindings =
-          File('${_packageRoot()}/lib/src/bindings_io.dart').readAsStringSync();
+      final bindings = File(
+        '${_packageRoot()}/lib/src/bindings_io.dart',
+      ).readAsStringSync();
       for (final symbol in declared) {
         expect(
           bindings,
@@ -72,25 +76,35 @@ void main() {
         expect(
           rustSources,
           contains('fn $symbol('),
-          reason: '$symbol is declared in src/rk_quic.h but not exported '
+          reason:
+              '$symbol is declared in src/rk_quic.h but not exported '
               'from rust/src/',
         );
       }
     });
 
     test('the ABI generation is the same number in all three places', () {
-      final inHeader =
-          RegExp(r'#define RK_QUIC_ABI_VERSION\s+(\d+)').firstMatch(header);
+      final inHeader = RegExp(
+        r'#define RK_QUIC_ABI_VERSION\s+(\d+)',
+      ).firstMatch(header);
       expect(inHeader, isNotNull, reason: 'no RK_QUIC_ABI_VERSION in header');
 
-      final ffiRs = File('${_packageRoot()}/rust/src/ffi.rs').readAsStringSync();
-      final inRust =
-          RegExp(r'RK_QUIC_ABI_VERSION:\s*u32\s*=\s*(\d+)').firstMatch(ffiRs);
+      final ffiRs = File(
+        '${_packageRoot()}/rust/src/ffi.rs',
+      ).readAsStringSync();
+      final inRust = RegExp(
+        r'RK_QUIC_ABI_VERSION:\s*u32\s*=\s*(\d+)',
+      ).firstMatch(ffiRs);
       expect(inRust, isNotNull, reason: 'no RK_QUIC_ABI_VERSION in ffi.rs');
 
-      final inDart =
-          RegExp(r'rkQuicAbiVersion\s*=\s*(\d+)').firstMatch(loaderDart);
-      expect(inDart, isNotNull, reason: 'no rkQuicAbiVersion in loader_io.dart');
+      final inDart = RegExp(
+        r'rkQuicAbiVersion\s*=\s*(\d+)',
+      ).firstMatch(loaderDart);
+      expect(
+        inDart,
+        isNotNull,
+        reason: 'no rkQuicAbiVersion in loader_io.dart',
+      );
 
       expect(int.parse(inHeader!.group(1)!), rkQuicAbiVersion);
       expect(int.parse(inRust!.group(1)!), rkQuicAbiVersion);
@@ -108,68 +122,77 @@ void main() {
 
   group('statuses cross by name (И147)', () {
     test('every Rust status name has a Dart variant of the same name', () {
-      final rustNames = RegExp(r'Status::\w+\s*=>\s*"([a-zA-Z]+)\\0"')
-          .allMatches(statusRs)
-          .map((m) => m.group(1)!)
-          .toSet();
+      final rustNames = RegExp(
+        r'Status::\w+\s*=>\s*"([a-zA-Z]+)\\0"',
+      ).allMatches(statusRs).map((m) => m.group(1)!).toSet();
 
-      expect(rustNames, isNotEmpty, reason: 'the status.rs parse found nothing');
+      expect(
+        rustNames,
+        isNotEmpty,
+        reason: 'the status.rs parse found nothing',
+      );
       expect(rustNames.length, greaterThanOrEqualTo(10));
 
       final dartNames = RkQuicStatus.values.map((s) => s.name).toSet();
       expect(
         dartNames,
         containsAll(rustNames),
-        reason: 'Rust can send a status name Dart has no variant for: '
+        reason:
+            'Rust can send a status name Dart has no variant for: '
             '${rustNames.difference(dartNames)}',
       );
     });
 
     test('the only Dart-side extra is the one that must never be sent', () {
-      final rustNames = RegExp(r'Status::\w+\s*=>\s*"([a-zA-Z]+)\\0"')
-          .allMatches(statusRs)
-          .map((m) => m.group(1)!)
-          .toSet();
+      final rustNames = RegExp(
+        r'Status::\w+\s*=>\s*"([a-zA-Z]+)\\0"',
+      ).allMatches(statusRs).map((m) => m.group(1)!).toSet();
       final dartNames = RkQuicStatus.values.map((s) => s.name).toSet();
 
       expect(
         dartNames.difference(rustNames),
         {RkQuicStatus.unrecognised.name},
-        reason: 'a Dart variant with no Rust counterpart is dead code, except '
+        reason:
+            'a Dart variant with no Rust counterpart is dead code, except '
             'the deliberate landing place for names this build does not know',
       );
     });
 
-    test('an unknown name resolves to unrecognised, never to a wrong branch',
-        () {
-      for (final wire in <String?>[
-        null,
-        '',
-        'someStatusFromANewerLibrary',
-        'OK',
-        '0',
-        'ok ',
-      ]) {
-        final status = statusFromWireName(wire);
-        if (wire == 'ok') {
-          expect(status, RkQuicStatus.ok);
-        } else {
-          expect(status, RkQuicStatus.unrecognised, reason: 'wire: "$wire"');
+    test(
+      'an unknown name resolves to unrecognised, never to a wrong branch',
+      () {
+        for (final wire in <String?>[
+          null,
+          '',
+          'someStatusFromANewerLibrary',
+          'OK',
+          '0',
+          'ok ',
+        ]) {
+          final status = statusFromWireName(wire);
+          if (wire == 'ok') {
+            expect(status, RkQuicStatus.ok);
+          } else {
+            expect(status, RkQuicStatus.unrecognised, reason: 'wire: "$wire"');
+          }
         }
-      }
-      // And the one that must resolve, does.
-      expect(statusFromWireName('portInUse'), RkQuicStatus.portInUse);
-      expect(statusFromWireName('peerGone'), RkQuicStatus.peerGone);
-      expect(statusFromWireName('panic'), RkQuicStatus.panic);
-    });
+        // And the one that must resolve, does.
+        expect(statusFromWireName('portInUse'), RkQuicStatus.portInUse);
+        expect(statusFromWireName('peerGone'), RkQuicStatus.peerGone);
+        expect(statusFromWireName('panic'), RkQuicStatus.panic);
+      },
+    );
 
     test('no status is sent as a number anywhere in the Rust ABI', () {
-      final ffiRs = File('${_packageRoot()}/rust/src/ffi.rs').readAsStringSync();
+      final ffiRs = File(
+        '${_packageRoot()}/rust/src/ffi.rs',
+      ).readAsStringSync();
       // `guard` returns a pointer; a return type of i32 or c_int would mean a
       // status had become an index again.
       expect(
-        RegExp(r'extern "C" fn \w+\([^)]*\)\s*->\s*(i32|c_int|u8)\b')
-            .hasMatch(ffiRs),
+        RegExp(
+          r'extern "C" fn \w+\([^)]*\)\s*->\s*(i32|c_int|u8)\b',
+        ).hasMatch(ffiRs),
         isFalse,
         reason: 'an entry point returns an integer status — И147 says names',
       );

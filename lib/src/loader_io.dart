@@ -36,7 +36,9 @@ typedef _VersionDart = ffi.Pointer<Utf8> Function();
 /// can always override without editing the package.
 List<String> defaultCandidatePaths() {
   final explicit = Platform.environment[rkQuicLibraryPathVariable];
-  final candidates = <String>[if (explicit != null && explicit.isNotEmpty) explicit];
+  final candidates = <String>[
+    if (explicit != null && explicit.isNotEmpty) explicit,
+  ];
 
   if (Platform.isWindows) {
     candidates.add('rk_quic.dll');
@@ -106,7 +108,8 @@ NativeProbe probeNativeLibrary({
       return NativeProbe(
         outcome: NativeLoadOutcome.symbolMissing,
         path: path,
-        detail: 'opened but does not export the rk_quic ABI: '
+        detail:
+            'opened but does not export the rk_quic ABI: '
             '${_firstLine(error)}',
       );
     }
@@ -122,7 +125,8 @@ NativeProbe probeNativeLibrary({
         path: path,
         version: foundVersion,
         abiVersion: foundAbi,
-        detail: 'library implements ABI generation $foundAbi, this build '
+        detail:
+            'library implements ABI generation $foundAbi, this build '
             'speaks $expected',
       );
     }

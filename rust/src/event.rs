@@ -22,7 +22,11 @@ use serde::Serialize;
 // right while every field stayed `snake_case` — the kind of half-correct that
 // a test comparing only the tag would have passed.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum Event {
     /// A browser opened a WebTransport session.
     SessionOpened {

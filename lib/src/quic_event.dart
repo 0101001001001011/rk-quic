@@ -17,7 +17,11 @@ sealed class QuicEvent {
     try {
       decoded = jsonDecode(json);
     } on FormatException catch (error) {
-      return UnknownQuicEvent(kind: '<unparsable>', raw: json, detail: '$error');
+      return UnknownQuicEvent(
+        kind: '<unparsable>',
+        raw: json,
+        detail: '$error',
+      );
     }
     if (decoded is! Map<String, Object?>) {
       return UnknownQuicEvent(
@@ -32,28 +36,29 @@ sealed class QuicEvent {
       return UnknownQuicEvent(kind: '<no kind>', raw: json);
     }
 
-    int sessionId() => (decoded as Map<String, Object?>)['sessionId'] as int? ?? -1;
+    int sessionId() =>
+        (decoded as Map<String, Object?>)['sessionId'] as int? ?? -1;
     String text(String key) =>
         (decoded as Map<String, Object?>)[key] as String? ?? '';
 
     return switch (kind) {
       'sessionOpened' => SessionOpened(
-          sessionId: sessionId(),
-          authority: text('authority'),
-          path: text('path'),
-        ),
+        sessionId: sessionId(),
+        authority: text('authority'),
+        path: text('path'),
+      ),
       'sessionClosed' => SessionClosed(
-          sessionId: sessionId(),
-          reason: text('reason'),
-        ),
+        sessionId: sessionId(),
+        reason: text('reason'),
+      ),
       'datagram' => DatagramReceived(
-          sessionId: sessionId(),
-          message: text('utf8'),
-        ),
+        sessionId: sessionId(),
+        message: text('utf8'),
+      ),
       'streamMessage' => StreamMessageReceived(
-          sessionId: sessionId(),
-          message: text('utf8'),
-        ),
+        sessionId: sessionId(),
+        message: text('utf8'),
+      ),
       'endpointError' => EndpointError(message: text('message')),
       _ => UnknownQuicEvent(kind: kind, raw: json),
     };

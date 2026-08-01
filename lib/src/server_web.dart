@@ -30,12 +30,12 @@ class QuicServerConfig {
   final Duration idleTimeout;
 
   Map<String, Object?> toJson() => {
-        'bindAddress': bindAddress,
-        'certificateChainPem': certificateChainPem,
-        'privateKeyPem': privateKeyPem,
-        'path': path,
-        'idleTimeoutMs': idleTimeout.inMilliseconds,
-      };
+    'bindAddress': bindAddress,
+    'certificateChainPem': certificateChainPem,
+    'privateKeyPem': privateKeyPem,
+    'path': path,
+    'idleTimeoutMs': idleTimeout.inMilliseconds,
+  };
 }
 
 /// Always [RkQuicStatus.unsupported] here, with the reason stated.
@@ -70,7 +70,7 @@ class QuicServer {
       RkQuicStatus.unsupported,
       null,
       'a browser cannot host a QUIC endpoint: there is no dart:ffi and no UDP '
-          'socket to bind. Connect to one instead, with the WebTransport API.',
+      'socket to bind. Connect to one instead, with the WebTransport API.',
     );
   }
 
@@ -78,8 +78,7 @@ class QuicServer {
     int sessionId,
     String message, {
     bool reliable = true,
-  }) async =>
-      RkQuicStatus.unsupported;
+  }) async => RkQuicStatus.unsupported;
 
   Future<RkQuicStatus> stop() async => RkQuicStatus.unsupported;
 }

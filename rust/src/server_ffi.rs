@@ -215,7 +215,11 @@ mod tests {
             return None;
         }
         // SAFETY: allocated by this library.
-        Some(unsafe { CString::from_raw(ptr) }.to_string_lossy().into_owned())
+        Some(
+            unsafe { CString::from_raw(ptr) }
+                .to_string_lossy()
+                .into_owned(),
+        )
     }
 
     fn valid_config(port: u16) -> CString {
@@ -291,7 +295,10 @@ mod tests {
         assert_eq!(status_of(status), "portInUse");
         assert_eq!(second, 0);
         let detail = take_error().expect("a taken port must come with a message");
-        assert!(detail.contains(&port.to_string()), "message names no port: {detail}");
+        assert!(
+            detail.contains(&port.to_string()),
+            "message names no port: {detail}"
+        );
 
         assert_eq!(status_of(rk_quic_server_stop(first)), "ok");
     }
@@ -344,13 +351,18 @@ mod tests {
 
         // SAFETY: a null out-pointer is documented as accepted.
         unsafe {
-            assert_eq!(status_of(rk_quic_server_local_port(handle, std::ptr::null_mut())), "ok");
+            assert_eq!(
+                status_of(rk_quic_server_local_port(handle, std::ptr::null_mut())),
+                "ok"
+            );
             assert_eq!(
                 status_of(rk_quic_server_poll(handle, 1, std::ptr::null_mut())),
                 "wouldBlock"
             );
-            assert_eq!(status_of(rk_quic_session_send(handle, 1, std::ptr::null(), 1)),
-                "invalidArgument");
+            assert_eq!(
+                status_of(rk_quic_session_send(handle, 1, std::ptr::null(), 1)),
+                "invalidArgument"
+            );
         }
 
         assert_eq!(status_of(rk_quic_server_stop(handle)), "ok");

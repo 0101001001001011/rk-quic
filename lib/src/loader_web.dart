@@ -32,7 +32,8 @@ NativeProbe probeNativeLibrary({
 }) {
   return const NativeProbe(
     outcome: NativeLoadOutcome.unsupportedPlatform,
-    detail: 'the browser has no dart:ffi; it is the client of a WebTransport '
+    detail:
+        'the browser has no dart:ffi; it is the client of a WebTransport '
         'endpoint, not its host',
   );
 }

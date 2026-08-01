@@ -21,8 +21,8 @@ String? locateBuiltLibrary() {
   final fileName = Platform.isWindows
       ? 'rk_quic.dll'
       : Platform.isMacOS
-          ? 'librk_quic.dylib'
-          : 'librk_quic.so';
+      ? 'librk_quic.dylib'
+      : 'librk_quic.so';
 
   final crateTarget = Directory('${_packageRoot()}/rust/target');
   if (!crateTarget.existsSync()) return null;
@@ -67,8 +67,10 @@ String crateVersionFromCargoToml() {
   final manifest = File('${_packageRoot()}/rust/Cargo.toml').readAsStringSync();
   // The first `version =` under `[package]`, before any `[dependencies]`.
   final packageSection = manifest.split(RegExp(r'^\[', multiLine: true))[1];
-  final match =
-      RegExp(r'^version\s*=\s*"([^"]+)"', multiLine: true).firstMatch(packageSection);
+  final match = RegExp(
+    r'^version\s*=\s*"([^"]+)"',
+    multiLine: true,
+  ).firstMatch(packageSection);
   if (match == null) {
     throw StateError('no version in rust/Cargo.toml [package]');
   }
@@ -87,6 +89,8 @@ String _packageRoot() {
     if (parent.path == dir.path) break;
     dir = parent;
   }
-  throw StateError('could not find the rk_quic package root from '
-      '${Directory.current.path}');
+  throw StateError(
+    'could not find the rk_quic package root from '
+    '${Directory.current.path}',
+  );
 }

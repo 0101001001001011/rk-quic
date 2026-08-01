@@ -187,7 +187,10 @@ pub fn start(config: ParsedConfig) -> Result<u64, (Status, String)> {
         .map_err(|_| {
             (
                 Status::InvalidArgument,
-                format!("idleTimeoutMs {:?} is out of range for QUIC", config.idle_timeout),
+                format!(
+                    "idleTimeoutMs {:?} is out of range for QUIC",
+                    config.idle_timeout
+                ),
             )
         })?
         .keep_alive_interval(Some(config.idle_timeout / 3))
@@ -413,7 +416,11 @@ mod tests {
         assert!(live_count() >= 1);
 
         let endpoint = lookup(handle).expect("handle resolves");
-        assert_ne!(endpoint.local_port(), 0, "port 0 must be resolved to a real one");
+        assert_ne!(
+            endpoint.local_port(),
+            0,
+            "port 0 must be resolved to a real one"
+        );
 
         // A weak reference and not a count: `live_count` is process-global and
         // cargo runs these tests in parallel, so a count proves nothing. This
@@ -456,7 +463,10 @@ mod tests {
             "an operator can act on a taken port; a generic bindFailed hides it. \
              message was: {message}"
         );
-        assert!(message.contains(&port.to_string()), "message names no port: {message}");
+        assert!(
+            message.contains(&port.to_string()),
+            "message names no port: {message}"
+        );
 
         assert_eq!(remove(first), Status::Ok);
     }

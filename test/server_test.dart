@@ -22,44 +22,54 @@ void main() {
 
   QuicServerConfig configWith({
     String bindAddress = '127.0.0.1:0',
-    String chain = '-----BEGIN CERTIFICATE-----\nnot really\n-----END CERTIFICATE-----\n',
-    String key = '-----BEGIN PRIVATE KEY-----\nnot really\n-----END PRIVATE KEY-----\n',
+    String chain =
+        '-----BEGIN CERTIFICATE-----\nnot really\n-----END CERTIFICATE-----\n',
+    String key =
+        '-----BEGIN PRIVATE KEY-----\nnot really\n-----END PRIVATE KEY-----\n',
     Duration idleTimeout = const Duration(seconds: 30),
-  }) =>
-      QuicServerConfig(
-        bindAddress: bindAddress,
-        certificateChainPem: chain,
-        privateKeyPem: key,
-        idleTimeout: idleTimeout,
-      );
+  }) => QuicServerConfig(
+    bindAddress: bindAddress,
+    certificateChainPem: chain,
+    privateKeyPem: key,
+    idleTimeout: idleTimeout,
+  );
 
   group('starting fails as a value, never as an exception (И144)', () {
-    test('a bind address with no port is invalidArgument, with a reason', () async {
-      final path = requireBuiltLibrary(libraryPath);
-      final start = await QuicServer.start(
-        configWith(bindAddress: '127.0.0.1'),
-        candidatePaths: [path],
-      );
+    test(
+      'a bind address with no port is invalidArgument, with a reason',
+      () async {
+        final path = requireBuiltLibrary(libraryPath);
+        final start = await QuicServer.start(
+          configWith(bindAddress: '127.0.0.1'),
+          candidatePaths: [path],
+        );
 
-      expect(start.status, RkQuicStatus.invalidArgument);
-      expect(start.server, isNull);
-      expect(start.detail, contains('port'), reason: 'the reason must be usable');
-    });
+        expect(start.status, RkQuicStatus.invalidArgument);
+        expect(start.server, isNull);
+        expect(
+          start.detail,
+          contains('port'),
+          reason: 'the reason must be usable',
+        );
+      },
+    );
 
-    test('a certificate that is not one is badCertificate, not invalidArgument',
-        () async {
-      final path = requireBuiltLibrary(libraryPath);
-      final start = await QuicServer.start(
-        configWith(chain: 'plainly not a certificate'),
-        candidatePaths: [path],
-      );
+    test(
+      'a certificate that is not one is badCertificate, not invalidArgument',
+      () async {
+        final path = requireBuiltLibrary(libraryPath);
+        final start = await QuicServer.start(
+          configWith(chain: 'plainly not a certificate'),
+          candidatePaths: [path],
+        );
 
-      // The distinction earns its keep: one of these is a typo in a setting,
-      // the other is a certificate that has to be reissued. Merging them would
-      // send an operator to the wrong place.
-      expect(start.status, RkQuicStatus.badCertificate);
-      expect(start.server, isNull);
-    });
+        // The distinction earns its keep: one of these is a typo in a setting,
+        // the other is a certificate that has to be reissued. Merging them would
+        // send an operator to the wrong place.
+        expect(start.status, RkQuicStatus.badCertificate);
+        expect(start.server, isNull);
+      },
+    );
 
     test('an idle timeout under a second is refused, and says why', () async {
       final path = requireBuiltLibrary(libraryPath);
@@ -72,21 +82,25 @@ void main() {
       expect(
         start.detail,
         contains('never'),
-        reason: 'a caller passing 0 meant "never time out", and must be told '
+        reason:
+            'a caller passing 0 meant "never time out", and must be told '
             'that there is no such setting and why',
       );
     });
 
-    test('no native library at all is unsupported, and nothing throws', () async {
-      final start = await QuicServer.start(
-        configWith(),
-        candidatePaths: const ['rk_quic_absent_xyz'],
-      );
+    test(
+      'no native library at all is unsupported, and nothing throws',
+      () async {
+        final start = await QuicServer.start(
+          configWith(),
+          candidatePaths: const ['rk_quic_absent_xyz'],
+        );
 
-      expect(start.status, RkQuicStatus.unsupported);
-      expect(start.server, isNull);
-      expect(start.detail, isNotNull);
-    });
+        expect(start.status, RkQuicStatus.unsupported);
+        expect(start.server, isNull);
+        expect(start.detail, isNotNull);
+      },
+    );
 
     test('nothing about starting throws, whatever the configuration', () async {
       final path = requireBuiltLibrary(libraryPath);
@@ -99,9 +113,13 @@ void main() {
       ]) {
         final start = await QuicServer.start(config, candidatePaths: [path]);
         expect(start.isOk, isFalse);
-        expect(start.status, isNot(RkQuicStatus.unrecognised),
-            reason: 'an unrecognised status means a name crossed the boundary '
-                'that this build does not know: ${start.detail}');
+        expect(
+          start.status,
+          isNot(RkQuicStatus.unrecognised),
+          reason:
+              'an unrecognised status means a name crossed the boundary '
+              'that this build does not know: ${start.detail}',
+        );
       }
     });
   });
@@ -110,12 +128,18 @@ void main() {
     test('every status a failed start produced is a known variant', () async {
       final path = requireBuiltLibrary(libraryPath);
       final seen = <RkQuicStatus>{};
-      seen.add((await QuicServer.start(configWith(bindAddress: 'x'),
-              candidatePaths: [path]))
-          .status);
-      seen.add((await QuicServer.start(configWith(chain: 'x'),
-              candidatePaths: [path]))
-          .status);
+      seen.add(
+        (await QuicServer.start(
+          configWith(bindAddress: 'x'),
+          candidatePaths: [path],
+        )).status,
+      );
+      seen.add(
+        (await QuicServer.start(
+          configWith(chain: 'x'),
+          candidatePaths: [path],
+        )).status,
+      );
 
       expect(seen, isNot(contains(RkQuicStatus.unrecognised)));
       expect(seen, contains(RkQuicStatus.invalidArgument));
@@ -126,14 +150,18 @@ void main() {
   group('events resolve by name, and an unknown one stays whole', () {
     test('each known kind becomes its own type', () {
       expect(
-        QuicEvent.fromJson('{"kind":"sessionOpened","sessionId":3,'
-            '"authority":"till.local","path":"/rk"}'),
+        QuicEvent.fromJson(
+          '{"kind":"sessionOpened","sessionId":3,'
+          '"authority":"till.local","path":"/rk"}',
+        ),
         isA<SessionOpened>()
             .having((e) => e.sessionId, 'sessionId', 3)
             .having((e) => e.authority, 'authority', 'till.local'),
       );
       expect(
-        QuicEvent.fromJson('{"kind":"sessionClosed","sessionId":3,"reason":"gone"}'),
+        QuicEvent.fromJson(
+          '{"kind":"sessionClosed","sessionId":3,"reason":"gone"}',
+        ),
         isA<SessionClosed>().having((e) => e.reason, 'reason', 'gone'),
       );
       expect(
@@ -141,7 +169,9 @@ void main() {
         isA<DatagramReceived>().having((e) => e.message, 'message', 'hi'),
       );
       expect(
-        QuicEvent.fromJson('{"kind":"streamMessage","sessionId":3,"utf8":"hi"}'),
+        QuicEvent.fromJson(
+          '{"kind":"streamMessage","sessionId":3,"utf8":"hi"}',
+        ),
         isA<StreamMessageReceived>().having((e) => e.message, 'message', 'hi'),
       );
       expect(
@@ -150,15 +180,21 @@ void main() {
       );
     });
 
-    test('a kind from a newer library is kept, not guessed at and not dropped',
-        () {
-      final event = QuicEvent.fromJson('{"kind":"somethingNewer","x":1}');
-      expect(event, isA<UnknownQuicEvent>());
-      expect((event as UnknownQuicEvent).kind, 'somethingNewer');
-      expect(event.raw, contains('somethingNewer'),
-          reason: 'discarding it would turn a version mismatch into '
-              '"the feature does not work"');
-    });
+    test(
+      'a kind from a newer library is kept, not guessed at and not dropped',
+      () {
+        final event = QuicEvent.fromJson('{"kind":"somethingNewer","x":1}');
+        expect(event, isA<UnknownQuicEvent>());
+        expect((event as UnknownQuicEvent).kind, 'somethingNewer');
+        expect(
+          event.raw,
+          contains('somethingNewer'),
+          reason:
+              'discarding it would turn a version mismatch into '
+              '"the feature does not work"',
+        );
+      },
+    );
 
     test('malformed JSON is an event, not an exception out of an isolate', () {
       for (final json in <String>['', 'not json', '[]', '{}', '{"kind":7}']) {

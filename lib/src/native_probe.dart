@@ -65,7 +65,8 @@ class NativeProbe {
   bool get isUsable => outcome == NativeLoadOutcome.loaded;
 
   @override
-  String toString() => 'NativeProbe(${outcome.name}'
+  String toString() =>
+      'NativeProbe(${outcome.name}'
       '${version == null ? '' : ', version: $version'}'
       '${abiVersion == null ? '' : ', abi: $abiVersion'}'
       '${path == null ? '' : ', path: $path'}'

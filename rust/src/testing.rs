@@ -24,11 +24,9 @@
 /// test exercises the same parsing path a caller would.
 pub fn self_signed_pem() -> (String, String) {
     let key = rcgen::KeyPair::generate().expect("generate key");
-    let mut params = rcgen::CertificateParams::new(vec![
-        "localhost".to_string(),
-        "127.0.0.1".to_string(),
-    ])
-    .expect("certificate parameters");
+    let mut params =
+        rcgen::CertificateParams::new(vec!["localhost".to_string(), "127.0.0.1".to_string()])
+            .expect("certificate parameters");
     params.distinguished_name = rcgen::DistinguishedName::new();
 
     // A day back so a clock skew of minutes cannot make it "not valid yet",

@@ -121,7 +121,10 @@ fn a_browser_style_client_opens_a_session_is_spoken_to_first_and_its_departure_i
     let heard = runtime.block_on(async {
         tokio::time::timeout(Duration::from_secs(10), async {
             use tokio::io::AsyncReadExt;
-            let mut stream = connection.accept_uni().await.expect("a stream from the server");
+            let mut stream = connection
+                .accept_uni()
+                .await
+                .expect("a stream from the server");
             let mut text = String::new();
             stream.read_to_string(&mut text).await.expect("read");
             text
@@ -158,7 +161,10 @@ fn a_browser_style_client_opens_a_session_is_spoken_to_first_and_its_departure_i
         unreachable!()
     };
     assert_eq!(closed_id, session_id);
-    assert!(!reason.is_empty(), "a close with no reason tells nobody anything");
+    assert!(
+        !reason.is_empty(),
+        "a close with no reason tells nobody anything"
+    );
 
     // And writing to it now is `peerGone` — a fact about the session, not a
     // fault of ours, and the signal to stop.
@@ -225,7 +231,10 @@ fn a_client_asking_for_the_wrong_path_never_becomes_a_session() {
     let opened = wait_for(&server, Duration::from_secs(10), |event| {
         matches!(event, Event::SessionOpened { .. })
     });
-    assert!(opened.is_some(), "the accepted session never reached the queue");
+    assert!(
+        opened.is_some(),
+        "the accepted session never reached the queue"
+    );
     wait_for(&server, Duration::from_secs(20), |event| {
         matches!(event, Event::SessionClosed { .. })
     });

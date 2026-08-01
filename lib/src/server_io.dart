@@ -64,12 +64,12 @@ class QuicServerConfig {
   final Duration idleTimeout;
 
   Map<String, Object?> toJson() => {
-        'bindAddress': bindAddress,
-        'certificateChainPem': certificateChainPem,
-        'privateKeyPem': privateKeyPem,
-        'path': path,
-        'idleTimeoutMs': idleTimeout.inMilliseconds,
-      };
+    'bindAddress': bindAddress,
+    'certificateChainPem': certificateChainPem,
+    'privateKeyPem': privateKeyPem,
+    'path': path,
+    'idleTimeoutMs': idleTimeout.inMilliseconds,
+  };
 }
 
 /// What came back from an attempt to start.
@@ -125,7 +125,7 @@ class QuicServer {
         RkQuicStatus.unsupported,
         null,
         'the native library could not be loaded; call probeNativeLibrary() '
-            'for which of missing, wrong file or wrong ABI it was',
+        'for which of missing, wrong file or wrong ABI it was',
       );
     }
 
@@ -175,7 +175,9 @@ class QuicServer {
     bool reliable = true,
   }) async {
     if (_stopped) return RkQuicStatus.notRunning;
-    final reply = await _commands.send(_SendCommand(sessionId, message, reliable));
+    final reply = await _commands.send(
+      _SendCommand(sessionId, message, reliable),
+    );
     return reply is _StatusReply ? reply.status : RkQuicStatus.unrecognised;
   }
 
@@ -316,7 +318,9 @@ void _commandLoop(_CommandStart start) {
 
   final bindings = _openBindings(start.candidatePaths);
   if (bindings == null) {
-    start.reply.send(const _StatusReply(RkQuicStatus.unsupported, 'no library'));
+    start.reply.send(
+      const _StatusReply(RkQuicStatus.unsupported, 'no library'),
+    );
     return;
   }
 
@@ -357,24 +361,26 @@ void _commandLoop(_CommandStart start) {
                 .sessionSend(handle, sessionId, payload, reliable ? 1 : 0)
                 .toDartString(),
           );
-          start.reply.send(_StatusReply(
-            status,
-            status == RkQuicStatus.ok ? null : bindings.takeLastError(),
-          ));
+          start.reply.send(
+            _StatusReply(
+              status,
+              status == RkQuicStatus.ok ? null : bindings.takeLastError(),
+            ),
+          );
         } finally {
           malloc.free(payload);
         }
 
       case _StopCommand():
-        final status =
-            statusFromWireName(bindings.serverStop(handle).toDartString());
+        final status = statusFromWireName(
+          bindings.serverStop(handle).toDartString(),
+        );
         start.reply.send(_StatusReply(status, null));
 
       default:
-        start.reply.send(const _StatusReply(
-          RkQuicStatus.unrecognised,
-          'unknown command',
-        ));
+        start.reply.send(
+          const _StatusReply(RkQuicStatus.unrecognised, 'unknown command'),
+        );
     }
   });
 }
