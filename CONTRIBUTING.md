@@ -12,13 +12,28 @@ is more honest than accepting changes that would silently disappear.
 
 ## What gets checked
 
-Everything CI does is reproducible locally:
+Everything CI does is reproducible locally, and **the native side goes
+first**: the Dart suite loads the library the crate produces and fails loudly
+when it is absent, so a test run before `cargo build` would be a green run over
+nothing.
+
+This package is a Flutter FFI plugin, so its suite runs under `flutter test`
+rather than `dart test`, and the Flutter SDK is needed as well as a Rust
+toolchain.
 
 ```bash
-dart pub get
+cd rust
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings
+cargo test
+cargo build --release
+cd ..
+
+flutter pub get
 dart format --output=none --set-exit-if-changed .
 dart analyze --fatal-infos
-dart pub publish --dry-run
+flutter test
+flutter pub publish --dry-run
 ```
 
 The last command is not about releasing. A package that cannot be published
