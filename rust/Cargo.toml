@@ -1,0 +1,22 @@
+[package]
+name = "rk_quic"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+license = "MIT"
+description = "Native part of the rk_quic Dart package: QUIC and WebTransport behind a C ABI."
+publish = false
+
+[lib]
+name = "rk_quic"
+# cdylib for Windows, Linux and Android; staticlib for Apple, where the pod is
+# built as a framework and the artefact must land inside it (see doc/native-build.md).
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true
+panic = "unwind"

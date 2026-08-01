@@ -1,0 +1,174 @@
+@TestOn('vm')
+library;
+
+import 'dart:io';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:rk_quic/rk_quic.dart';
+
+import 'support/built_library.dart';
+
+/// Three files describe the same boundary — `src/rk_quic.h`, `rust/src/`, and
+/// the Dart bindings. Nothing makes them agree, so this suite does.
+///
+/// `ffigen` would have generated the Dart side from the header and removed one
+/// of the three. It was not used: the surface is small enough to read in one
+/// screen, ffigen needs LLVM installed wherever it is regenerated, and a
+/// generated file in git invites the question of which copy is true. The drift
+/// it would have prevented is caught here instead, and the check also covers
+/// the Rust side, which ffigen would not have.
+void main() {
+  late final String header =
+      File('${_packageRoot()}/src/rk_quic.h').readAsStringSync();
+  late final String statusRs =
+      File('${_packageRoot()}/rust/src/status.rs').readAsStringSync();
+  late final String loaderDart =
+      File('${_packageRoot()}/lib/src/loader_io.dart').readAsStringSync();
+
+  group('the header and the Dart bindings name the same symbols', () {
+    test('every function the header declares is looked up somewhere', () {
+      final declared = RegExp(r'\b(rk_quic_[a-z_]+)\s*\(', multiLine: true)
+          .allMatches(header)
+          .map((m) => m.group(1)!)
+          .toSet();
+
+      expect(declared, isNotEmpty, reason: 'the header parse found nothing');
+      expect(
+        declared,
+        containsAll(<String>{
+          'rk_quic_abi_version',
+          'rk_quic_version',
+          'rk_quic_string_free',
+          'rk_quic_last_error',
+        }),
+      );
+
+      // Every one of them must exist in Rust with #[no_mangle], or the header
+      // is describing a library that does not exist.
+      final rustSources = Directory('${_packageRoot()}/rust/src')
+          .listSync()
+          .whereType<File>()
+          .map((f) => f.readAsStringSync())
+          .join('\n');
+      for (final symbol in declared) {
+        expect(
+          rustSources,
+          contains('fn $symbol('),
+          reason: '$symbol is declared in src/rk_quic.h but not exported '
+              'from rust/src/',
+        );
+      }
+    });
+
+    test('the ABI generation is the same number in all three places', () {
+      final inHeader =
+          RegExp(r'#define RK_QUIC_ABI_VERSION\s+(\d+)').firstMatch(header);
+      expect(inHeader, isNotNull, reason: 'no RK_QUIC_ABI_VERSION in header');
+
+      final ffiRs = File('${_packageRoot()}/rust/src/ffi.rs').readAsStringSync();
+      final inRust =
+          RegExp(r'RK_QUIC_ABI_VERSION:\s*u32\s*=\s*(\d+)').firstMatch(ffiRs);
+      expect(inRust, isNotNull, reason: 'no RK_QUIC_ABI_VERSION in ffi.rs');
+
+      final inDart =
+          RegExp(r'rkQuicAbiVersion\s*=\s*(\d+)').firstMatch(loaderDart);
+      expect(inDart, isNotNull, reason: 'no rkQuicAbiVersion in loader_io.dart');
+
+      expect(int.parse(inHeader!.group(1)!), rkQuicAbiVersion);
+      expect(int.parse(inRust!.group(1)!), rkQuicAbiVersion);
+      expect(int.parse(inDart!.group(1)!), rkQuicAbiVersion);
+    });
+
+    test('the library actually exports what the header promises', () {
+      final path = requireBuiltLibrary(locateBuiltLibrary());
+      // `probeNativeLibrary` reports `symbolMissing` rather than `loaded` when
+      // a lookup fails, so a clean `loaded` is the assertion.
+      final probe = probeNativeLibrary(candidatePaths: [path]);
+      expect(probe.outcome, NativeLoadOutcome.loaded, reason: probe.toString());
+    });
+  });
+
+  group('statuses cross by name (И147)', () {
+    test('every Rust status name has a Dart variant of the same name', () {
+      final rustNames = RegExp(r'Status::\w+\s*=>\s*"([a-zA-Z]+)\\0"')
+          .allMatches(statusRs)
+          .map((m) => m.group(1)!)
+          .toSet();
+
+      expect(rustNames, isNotEmpty, reason: 'the status.rs parse found nothing');
+      expect(rustNames.length, greaterThanOrEqualTo(10));
+
+      final dartNames = RkQuicStatus.values.map((s) => s.name).toSet();
+      expect(
+        dartNames,
+        containsAll(rustNames),
+        reason: 'Rust can send a status name Dart has no variant for: '
+            '${rustNames.difference(dartNames)}',
+      );
+    });
+
+    test('the only Dart-side extra is the one that must never be sent', () {
+      final rustNames = RegExp(r'Status::\w+\s*=>\s*"([a-zA-Z]+)\\0"')
+          .allMatches(statusRs)
+          .map((m) => m.group(1)!)
+          .toSet();
+      final dartNames = RkQuicStatus.values.map((s) => s.name).toSet();
+
+      expect(
+        dartNames.difference(rustNames),
+        {RkQuicStatus.unrecognised.name},
+        reason: 'a Dart variant with no Rust counterpart is dead code, except '
+            'the deliberate landing place for names this build does not know',
+      );
+    });
+
+    test('an unknown name resolves to unrecognised, never to a wrong branch',
+        () {
+      for (final wire in <String?>[
+        null,
+        '',
+        'someStatusFromANewerLibrary',
+        'OK',
+        '0',
+        'ok ',
+      ]) {
+        final status = statusFromWireName(wire);
+        if (wire == 'ok') {
+          expect(status, RkQuicStatus.ok);
+        } else {
+          expect(status, RkQuicStatus.unrecognised, reason: 'wire: "$wire"');
+        }
+      }
+      // And the one that must resolve, does.
+      expect(statusFromWireName('portInUse'), RkQuicStatus.portInUse);
+      expect(statusFromWireName('peerGone'), RkQuicStatus.peerGone);
+      expect(statusFromWireName('panic'), RkQuicStatus.panic);
+    });
+
+    test('no status is sent as a number anywhere in the Rust ABI', () {
+      final ffiRs = File('${_packageRoot()}/rust/src/ffi.rs').readAsStringSync();
+      // `guard` returns a pointer; a return type of i32 or c_int would mean a
+      // status had become an index again.
+      expect(
+        RegExp(r'extern "C" fn \w+\([^)]*\)\s*->\s*(i32|c_int|u8)\b')
+            .hasMatch(ffiRs),
+        isFalse,
+        reason: 'an entry point returns an integer status — И147 says names',
+      );
+    });
+  });
+}
+
+String _packageRoot() {
+  var dir = Directory.current;
+  for (var i = 0; i < 6; i++) {
+    if (File('${dir.path}/pubspec.yaml').existsSync() &&
+        Directory('${dir.path}/rust').existsSync()) {
+      return dir.path;
+    }
+    final parent = dir.parent;
+    if (parent.path == dir.path) break;
+    dir = parent;
+  }
+  throw StateError('could not find the rk_quic package root');
+}
