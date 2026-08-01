@@ -8,7 +8,7 @@ The first version with a native part — and a QUIC endpoint that speaks first.
   (ordered, retransmitted) or as a datagram. Implemented on **quinn** — see the
   README for why not quiche.
 - Everything that blocks — waiting for an event and sending reliably — is on
-  helper isolates: the interface isolate never enters the native part (И145).
+  helper isolates: the interface isolate never enters the native part.
 - `idleTimeoutMs` is mandatory and has no "never" value. Measured: without it a
   client that vanished without warning is not noticed at all — the server had
   still not seen `sessionClosed` twenty seconds after the client left.

@@ -23,7 +23,7 @@ Future<void> main() async {
   final server = start.server;
   if (server == null) {
     // portInUse, badCertificate, invalidArgument, unsupported — a value,
-    // not an exception (И144). The till carries on selling, the browser
+    // not an exception. The till carries on selling, the browser
     // carries on polling REST.
     print('the endpoint did not come up: $start');
     return;

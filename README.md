@@ -42,7 +42,7 @@ Future<void> main() async {
 
 Everything here that blocks — waiting for an event and sending reliably — lives
 on helper isolates: the interface isolate makes not one call into the native
-part (И145).
+part.
 
 The order of work was chosen deliberately: first an empty library was made to
 arrive at every reachable target, and only then was the transport laid on top of
