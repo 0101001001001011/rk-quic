@@ -1,54 +1,54 @@
-# Пример
+# Example
 
-Касса поднимает точку и сама сообщает браузеру о смене состояния — ничего не
-ожидая от него.
+The till brings up an endpoint and tells the browser about a change of state by
+itself — waiting for nothing from it.
 
 ```dart
 import 'package:rk_quic/rk_quic.dart';
 
 Future<void> main() async {
-  // Версия приходит из загруженной библиотеки, а не из константы Dart:
-  // если рядом лежит старый артефакт, здесь это и будет видно.
-  print('rk_quic ${rkQuicVersion ?? "нативной части нет"}');
+  // The version comes from the loaded library, not from a Dart constant:
+  // if a stale artefact is sitting next to you, this is where it shows.
+  print('rk_quic ${rkQuicVersion ?? "no native part"}');
 
   final start = await QuicServer.start(QuicServerConfig(
     bindAddress: '0.0.0.0:4433',
-    // Выдаёт rk_pki. Этот пакет сертификаты не минтит намеренно: два
-    // удостоверяющих центра в одной установке — это установка, в которой
-    // между ними никто не выбирал.
+    // Issued by rk_pki. This package deliberately does not mint
+    // certificates: two certificate authorities in one installation is an
+    // installation where nobody chose between them.
     certificateChainPem: chainPem,
     privateKeyPem: keyPem, // PKCS#8
   ));
 
   final server = start.server;
   if (server == null) {
-    // portInUse, badCertificate, invalidArgument, unsupported — значение,
-    // а не исключение (И144). Касса продолжает продавать, браузер продолжает
-    // опрашивать REST.
-    print('точка не поднялась: $start');
+    // portInUse, badCertificate, invalidArgument, unsupported — a value,
+    // not an exception (И144). The till carries on selling, the browser
+    // carries on polling REST.
+    print('the endpoint did not come up: $start');
     return;
   }
-  print('слушаем порт ${server.port}');
+  print('listening on port ${server.port}');
 
   server.events.listen((event) {
     switch (event) {
       case SessionOpened(:final sessionId):
-        // Никто ничего не спрашивал. В этом весь смысл пакета.
-        server.send(sessionId, 'задание печати 41 напечатано');
+        // Nobody asked for anything. That is the entire point of the package.
+        server.send(sessionId, 'print job 41 printed');
       case SessionClosed(:final sessionId, :final reason):
-        // Браузер закрыт, крышка ноутбука опущена, Wi-Fi пропал — с точки
-        // зрения кассы это одно и то же: писать в сессию больше некуда.
-        print('сессия $sessionId ушла: $reason');
+        // Browser closed, laptop lid shut, Wi-Fi gone — from the till's point
+        // of view these are the same thing: there is nowhere left to write.
+        print('session $sessionId is gone: $reason');
       case StreamMessageReceived(:final message):
-        print('от браузера: $message');
+        print('from the browser: $message');
       case DatagramReceived(:final message):
-        print('датаграмма: $message');
+        print('datagram: $message');
       case EndpointError(:final message):
-        print('точке плохо: $message');
+        print('the endpoint is unwell: $message');
       case UnknownQuicEvent(:final kind):
-        // Событие из более новой библиотеки. Сохранено целиком, а не отброшено
-        // и не подогнано под ближайшее известное.
-        print('незнакомое событие: $kind');
+        // An event from a newer library. Kept whole, rather than dropped or
+        // forced into the nearest known case.
+        print('unfamiliar event: $kind');
     }
   });
 

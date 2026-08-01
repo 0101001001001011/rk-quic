@@ -1,143 +1,149 @@
-# Сборка нативной части
+# Building the native part
 
-`rk_quic` — **FFI-плагин Flutter**. Cargo вызывается из файлов сборки на
-платформу; артефакт отдаётся инструменту Flutter, который кладёт его в
-приложение. Каталога `hook/` здесь нет и быть не должно — почему, сказано ниже.
+`rk_quic` is a **Flutter FFI plugin**. Cargo is invoked from the per-platform
+build files; the artefact is handed to the Flutter tool, which puts it into the
+application. There is no `hook/` directory here and there must not be — why is
+below.
 
-## Что должно стоять у потребителя
+## What a consumer must have installed
 
-| Цель | Сверх Rust |
+| Target | Beyond Rust |
 | --- | --- |
-| Windows | Visual Studio с рабочей нагрузкой C++ (нужны CMake и MSBuild); цель `x86_64-pc-windows-msvc` |
-| Linux | `clang cmake ninja-build pkg-config libgtk-3-dev`; цель `x86_64-unknown-linux-gnu` |
-| Android | Android SDK, NDK, JDK 17; цели `aarch64-linux-android`, `armv7-linux-androideabi`, `x86_64-linux-android` |
-| macOS / iOS | Xcode, CocoaPods (то есть Ruby); цели `aarch64-apple-darwin`, `x86_64-apple-darwin`, `aarch64-apple-ios`, `aarch64-apple-ios-sim` |
-| Web | ничего: в браузере нативной части нет по устройству |
+| Windows | Visual Studio with the C++ workload (CMake and MSBuild are needed); target `x86_64-pc-windows-msvc` |
+| Linux | `clang cmake ninja-build pkg-config libgtk-3-dev`; target `x86_64-unknown-linux-gnu` |
+| Android | Android SDK, NDK, JDK 17; targets `aarch64-linux-android`, `armv7-linux-androideabi`, `x86_64-linux-android` |
+| macOS / iOS | Xcode, CocoaPods (and therefore Ruby); targets `aarch64-apple-darwin`, `x86_64-apple-darwin`, `aarch64-apple-ios`, `aarch64-apple-ios-sim` |
+| Web | nothing: by design there is no native part in the browser |
 
-Кросс-компиляцию не отменяет ни один механизм сборки: cargo всё равно нужен
-линкер NDK для Android и Xcode для Apple.
+No build mechanism removes cross-compilation: cargo still needs the NDK linker
+for Android and Xcode for Apple.
 
-## Три пути к cargo, а не один
+## Three routes to cargo, not one
 
-Это неприятно, и лучше знать заранее, чем открывать заново.
+This is unpleasant, and better known in advance than rediscovered.
 
-| Платформы | Как вызывается cargo |
+| Platforms | How cargo is invoked |
 | --- | --- |
-| Windows, Linux | CMake: `src/CMakeLists.txt`, путь отдаётся в `rk_quic_bundled_libraries` |
-| Android | Gradle напрямую: задача `rkQuicCargoBuild` в `android/build.gradle`, результат кладётся в `jniLibs.srcDirs` |
-| macOS, iOS | `apple/build_rust.sh` из фазы-скрипта podspec |
+| Windows, Linux | CMake: `src/CMakeLists.txt`, the path handed over in `rk_quic_bundled_libraries` |
+| Android | Gradle directly: the `rkQuicCargoBuild` task in `android/build.gradle`, the result placed in `jniLibs.srcDirs` |
+| macOS, iOS | `apple/build_rust.sh` from a podspec script phase |
 
-Причина у каждого расхождения своя, и обе стоят того, чтобы быть записанными.
+Each divergence has its own reason, and both are worth writing down.
 
-### Android: CMake здесь не работает, и «зелёная сборка» это скрывает
+### Android: CMake does not work here, and "a green build" hides it
 
-Очевидная форма — та же, что на Windows и Linux: `externalNativeBuild.cmake.path`
-на общий `src/CMakeLists.txt`, cargo внутри `add_custom_target`, копирование в
-`CMAKE_LIBRARY_OUTPUT_DIRECTORY`. Происходит следующее, ровно в таком порядке.
+The obvious shape is the one used on Windows and Linux:
+`externalNativeBuild.cmake.path` pointed at the shared `src/CMakeLists.txt`,
+cargo inside an `add_custom_target`, a copy into
+`CMAKE_LIBRARY_OUTPUT_DIRECTORY`. What happens is the following, in exactly this
+order.
 
-1. При `project(... LANGUAGES NONE)` AGP падает на этапе конфигурации с голым
-   `java.lang.NullPointerException` в `CmakeFileApiV1Kt.readCmakeFileApiReply`:
-   он читает ответ file API у CMake и ждёт объект `toolchains`, а CMake выдаёт
-   его только для проекта с объявленным языком. Ни сообщения, ни файла, ни строки.
+1. With `project(... LANGUAGES NONE)`, AGP fails at the configuration stage with
+   a bare `java.lang.NullPointerException` in
+   `CmakeFileApiV1Kt.readCmakeFileApiReply`: it reads CMake's file API reply and
+   expects a `toolchains` object, which CMake emits only for a project that
+   declares a language. No message, no file, no line.
 
-2. `LANGUAGES C` эту стену проходит — и дальше **сборка успешна, а библиотеки
-   нет**. Читается в `.cxx/<config>/<hash>/<abi>/android_gradle_build.json`: AGP
-   видит пользовательскую цель как
-   `"rk_quic_cargo::@…": { "artifactName": "rk_quic_cargo" }` **без ключа
-   `output`**, потому что custom target не производит библиотеки, которую CMake
-   мог бы назвать. После этого AGP просит ninja собрать пустой список целей —
-   cargo не запускается вовсе, и шаг копирования, подвешенный к цели, которую
-   никто не вызывает, сработать не может. Проверено распаковкой APK: 38,9 МБ,
-   `libflutter.so` и `libapp.so` на три ABI, `librk_quic.so` нет.
+2. `LANGUAGES C` gets past that wall — and then **the build succeeds and there
+   is no library**. It can be read in
+   `.cxx/<config>/<hash>/<abi>/android_gradle_build.json`: AGP sees the custom
+   target as `"rk_quic_cargo::@…": { "artifactName": "rk_quic_cargo" }`
+   **without an `output` key**, because a custom target produces no library that
+   CMake could name. AGP then asks ninja to build an empty list of targets —
+   cargo does not run at all, and the copy step hung off a target nobody invokes
+   cannot fire. Confirmed by unpacking the APK: 38.9 MB, `libflutter.so` and
+   `libapp.so` for three ABIs, no `librk_quic.so`.
 
-Зелёная сборка, отгружающая пустоту, — худший из возможных исходов, поэтому
-путь через CMake на Android не чинится, а оставляется.
+A green build that ships nothing is the worst possible outcome, so the CMake
+route on Android is abandoned rather than repaired.
 
-Ещё одна мина того же класса, найденная тут же: если собрать и `x86`, в APK
-появится `lib/x86/librk_quic.so` в каталоге, где нет `libflutter.so` — Flutter
-32-битный x86 не поставляет. Android выбирает каталог по основному ABI
-устройства и грузит то, что в нём лежит, поэтому 32-битное x86-устройство
-выбрало бы каталог с одной нашей библиотекой и упало. Набор по умолчанию
-совпадает ровно с тем, что кладёт Flutter; `x86` собирается по требованию
-(`-PrkQuicAbiFilter=x86`).
+Another mine of the same class, found right there: build `x86` as well and the
+APK gains `lib/x86/librk_quic.so` in a directory that has no `libflutter.so` —
+Flutter does not ship 32-bit x86. Android picks the directory by the device's
+primary ABI and loads what is in it, so a 32-bit x86 device would pick the
+directory holding only our library and crash. The default set matches exactly
+what Flutter ships; `x86` is built on request (`-PrkQuicAbiFilter=x86`).
 
-### Apple: внутрь пода, а не рядом с ним
+### Apple: inside the pod, not beside it
 
-Шаблоны Podfile у Flutter содержат `use_frameworks!`, поэтому под собирается как
-`rk_quic.framework`, и Dart открывает `rk_quic.framework/rk_quic` — один
-двоичный файл Mach-O. На Windows и Linux хватало отдать CMake абсолютный путь и
-дать инструменту скопировать файл рядом с runner; внутри фреймворка никакого
-«рядом» нет.
+Flutter's Podfile templates contain `use_frameworks!`, so the pod is built as
+`rk_quic.framework` and Dart opens `rk_quic.framework/rk_quic` — a single Mach-O
+binary. On Windows and Linux it was enough to hand CMake an absolute path and
+let the tool copy the file next to the runner; inside a framework there is no
+"next to".
 
-Поэтому Apple получает **статический** архив, а `-force_load` в `OTHER_LDFLAGS`
-втягивает все объекты в двоичный файл фреймворка. Именно `-force_load`, а не
-обычный `-l`: ни Objective-C, ни Swift эти символы не упоминают — их ищет Dart по
-имени во время работы, — и обычная линковка выбросила бы весь архив как
-неиспользуемый.
+So Apple gets a **static** archive, and `-force_load` in `OTHER_LDFLAGS` pulls
+every object into the framework binary. `-force_load` specifically, not a plain
+`-l`: neither Objective-C nor Swift mentions these symbols — Dart looks them up
+by name at run time — and ordinary linking would discard the whole archive as
+unused.
 
-**Ни один абзац про Apple сборкой не проверен.** Mac в распоряжении нет; всё
-вычитано из инструментов. Первому, у кого будет Xcode, проверять в таком
-порядке:
+**Not one paragraph about Apple is confirmed by a build.** There is no Mac
+available; all of it is read out of the tools. The first person with Xcode
+should check, in this order:
 
-1. Собирается ли `aws-lc-rs` под цели Apple. Это **самый вероятный отказ**, а не
-   podspec: у него сборочный скрипт на C, которому нужны CMake и подходящий
-   компилятор. На Android этот шаг проверен и проходит — но только после того,
-   как заданы и `CARGO_TARGET_<TRIPLE>_LINKER`, и `AR_<triple>`; без второго
-   `cc-rs` ищет несуществующий `aarch64-linux-android-ar` и падает. У Apple
-   ожидается тот же класс отказа с другими именами.
-2. Существует ли вообще двоичный файл фреймворка (`ls …/rk_quic.framework/rk_quic`).
-3. Перечисляет ли `nm -gU` на нём `_rk_quic_version` и `_rk_quic_server_start`.
-4. Есть ли срез симулятора наравне со срезом устройства.
-5. Отдельно для iOS: приложению нужно право слушать UDP-порт, и в фоне сокет
-   закрывается системой. Точка QUIC на iOS осмысленна только пока приложение на
-   переднем плане — это ограничение платформы, а не пакета.
+1. Whether `aws-lc-rs` builds for the Apple targets. This is **the most likely
+   failure**, not the podspec: it has a C build script that needs CMake and a
+   suitable compiler. On Android this step is proved and passes — but only after
+   both `CARGO_TARGET_<TRIPLE>_LINKER` and `AR_<triple>` are set; without the
+   second, `cc-rs` looks for a non-existent `aarch64-linux-android-ar` and
+   fails. The same class of failure under different names is expected on Apple.
+2. Whether the framework binary exists at all
+   (`ls …/rk_quic.framework/rk_quic`).
+3. Whether `nm -gU` on it lists `_rk_quic_version` and `_rk_quic_server_start`.
+4. Whether there is a simulator slice alongside the device slice.
+5. For iOS specifically: the application needs the entitlement to listen on a
+   UDP port, and in the background the socket is closed by the system. A QUIC
+   endpoint on iOS is only meaningful while the application is in the
+   foreground — that is a platform limit, not a limit of this package.
 
-## Файлы и назначение каждого
+## The files, and what each is for
 
-| Файл | Зачем |
+| File | Why |
 | --- | --- |
-| `rust/` | крейт: `Cargo.toml`, `Cargo.lock`, `src/` |
-| `src/rk_quic.h` | C ABI, сказанный один раз; сверяется `test/abi_surface_test.dart` |
-| `src/CMakeLists.txt` | отображение платформы CMake на тройку Rust, вызов cargo (Windows и Linux) |
-| `windows/CMakeLists.txt` | подключает `src/`, отдаёт путь в `rk_quic_bundled_libraries` |
-| `linux/CMakeLists.txt` | то же |
-| `android/build.gradle` | задача `rkQuicCargoBuild`, отображение ABI на тройку и на обёртку clang из NDK, `jniLibs.srcDirs` |
-| `android/settings.gradle` | требуется Gradle |
-| `android/src/main/AndroidManifest.xml` | требуется библиотекой Android |
-| `apple/build_rust.sh` | собирает статический архив, который Xcode линкует в под |
-| `ios/rk_quic.podspec`, `macos/rk_quic.podspec` | CocoaPods: фаза-скрипт и `-force_load` |
+| `rust/` | the crate: `Cargo.toml`, `Cargo.lock`, `src/` |
+| `src/rk_quic.h` | the C ABI, said once; checked by `test/abi_surface_test.dart` |
+| `src/CMakeLists.txt` | maps the CMake platform onto a Rust triple and invokes cargo (Windows and Linux) |
+| `windows/CMakeLists.txt` | pulls in `src/`, hands the path over in `rk_quic_bundled_libraries` |
+| `linux/CMakeLists.txt` | the same |
+| `android/build.gradle` | the `rkQuicCargoBuild` task, the mapping of ABI onto triple and onto the NDK clang wrapper, `jniLibs.srcDirs` |
+| `android/settings.gradle` | required by Gradle |
+| `android/src/main/AndroidManifest.xml` | required by an Android library |
+| `apple/build_rust.sh` | builds the static archive that Xcode links into the pod |
+| `ios/rk_quic.podspec`, `macos/rk_quic.podspec` | CocoaPods: the script phase and `-force_load` |
 
-Плюс блок `flutter.plugin.platforms` в `pubspec.yaml`, без которого инструмент
-Flutter ни на что из перечисленного не смотрит.
+Plus the `flutter.plugin.platforms` block in `pubspec.yaml`, without which the
+Flutter tool looks at none of the above.
 
-Одно отображение вывести из другого нельзя, и ровно здесь ошибаются: обёртка
-clang в NDK для 32-битного ARM называется `armv7a-linux-androideabi`, а тройка
-Rust — `armv7-linux-androideabi`.
+Neither mapping can be derived from the other, and this is exactly where people
+get it wrong: the NDK clang wrapper for 32-bit ARM is called
+`armv7a-linux-androideabi`, while the Rust triple is `armv7-linux-androideabi`.
 
-## Почему не `hook/build.dart`
+## Why not `hook/build.dart`
 
-Измерено 2026-07-31
-(`.superpowers/sdd/2026-07-31-native-pipeline/task-2-report.md`): на Flutter
-3.32.4 stable хуки доводят библиотеку до **нуля целей из шести**, потому что
-возможность закрыта каналом SDK, а `flutter config --enable-native-assets`
-принимается и не действует. Хуже, чем бесполезно: **само наличие каталога
-`hook/`** ломает `dart run`, `dart test` и `flutter build` у любого потребителя
-пакета на любой платформе. Цена ошибки — не «одна цель не собралась», а «не
-собирается ничего».
+Measured 2026-07-31
+(`.superpowers/sdd/2026-07-31-native-pipeline/task-2-report.md`): on Flutter
+3.32.4 stable, hooks get the library to **zero targets out of six**, because the
+feature is gated off on the stable SDK channel and `flutter config
+--enable-native-assets` is accepted without taking effect. Worse than useless:
+**the mere presence of a `hook/` directory** breaks `dart run`, `dart test` and
+`flutter build` for every consumer of the package, on every platform. The cost
+of the mistake is not "one target failed to build" but "nothing builds".
 
-Условие пересмотра одно и проверяется командой: `flutter config --list`
-перестаёт печатать `(Unavailable)` рядом с `enable-native-assets` на
-закреплённой версии Flutter.
+There is one condition for revisiting this, and a command that checks it:
+`flutter config --list` stops printing `(Unavailable)` next to
+`enable-native-assets` on the pinned Flutter version.
 
-## Сборка руками
+## Building by hand
 
 ```sh
 cd packages/rk_quic/rust
-cargo build --release                                   # хост
-cargo build --release --target aarch64-linux-android    # нужен линкер NDK
+cargo build --release                                   # host
+cargo build --release --target aarch64-linux-android    # needs the NDK linker
 cargo test
 cargo clippy --all-targets -- -D warnings
 ```
 
-Тесты пакета находят результат сами; `RK_QUIC_LIBRARY=<путь>` направляет их в
-другое место — например, на артефакт, который уже попал в собранное приложение.
+The package's tests find the result on their own; `RK_QUIC_LIBRARY=<path>`
+points them somewhere else — at the artefact that already went into a built
+application, for instance.

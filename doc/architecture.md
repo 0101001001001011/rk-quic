@@ -1,37 +1,42 @@
-# QUIC и WebTransport — устройство
+# QUIC and WebTransport — how this package is built
 
-**Состояние: замысел.** Версия 0.0.1 занимает имя и проверяет конвейер
-публикации; описанного ниже в коде пока нет. Документ существует, чтобы
-реализация сверялась с ним, а не изобреталась заново.
-
-## Где проходит граница
+## Where the boundary runs
 
 ```mermaid
 flowchart TB
-    UI["Интерфейс — общий на всех платформах<br/>чистый Dart, FFI недоступен"]
-    D["Контракт в домене<br/>не знает, чем он реализован"]
-    L["Локальная привязка<br/>Dart + dart:ffi"]
-    N["Нативная библиотека<br/>Rust"]
+    UI["Interface — shared across all platforms<br/>pure Dart, FFI unavailable"]
+    D["Contract in the domain<br/>does not know what implements it"]
+    L["Local binding<br/>Dart + dart:ffi"]
+    N["Native library<br/>Rust"]
 
     UI --> D
     D --> L
     L --> N
 ```
 
-Правило, из которого всё следует: **в браузере `dart:ffi` не существует**.
-Значит нативный код живёт строго ниже контракта, а интерфейс не знает о нём
-ничего и продолжает собираться под web.
+The rule everything follows from: **`dart:ffi` does not exist in the browser**.
+So native code lives strictly below the contract, and the interface knows
+nothing about it and keeps building for web.
 
-## Почему нативная библиотека, а не Dart
+## Why a native library rather than Dart
 
-В Dart нет своей реализации QUIC, и оба запроса в трекере SDK закрыты со статусом «не планируется» (2015 и 2019). Значит выбор не между «на Dart» и «нативно», а между «нативно» и «никак». WebTransport сверх того требует HTTP/3, то есть сервер обязан говорить по QUIC — а серверная сторона у нас на Dart.
+Dart has no QUIC implementation of its own, and both requests in the SDK tracker
+are closed as "not planned" (2015 and 2019). So the choice is not between "in
+Dart" and "natively" but between "natively" and "not at all". WebTransport
+requires HTTP/3 on top of that, which means the server has to speak QUIC — and
+our server side is in Dart.
 
-## Что обязано быть верно в реализации
+## What has to be true in the implementation
 
-- Отказ библиотеки не может обрушить процесс: ошибка возвращается значением,
-  а не исключением из чужого стека.
-- Ни один вызов не блокирует поток пользовательского интерфейса.
-- Всё, что выделено в нативной части, освобождается детерминированно —
-  сборщик мусора Dart о ней ничего не знает.
-- Перечисления пересекают границу **по имени**, никогда по номеру: номер меняет
-  смысл в тот момент, когда в середину списка добавляют случай.
+- A failure in the library cannot bring the process down: an error is returned
+  as a value, not as an exception out of a foreign stack.
+- No call blocks the user interface thread.
+- Everything allocated in the native part is freed deterministically — Dart's
+  garbage collector knows nothing about it.
+- Enumerations cross the boundary **by name**, never by number: a number changes
+  meaning the moment a case is inserted into the middle of a list.
+
+All four hold in 0.1.0. The endpoint, the sessions and the events are
+implemented on quinn; the reasoning for quinn over quiche, the outcome table for
+loading the library, and what has actually been proved on which platform are in
+the README, and the build mechanism is in `doc/native-build.md`.

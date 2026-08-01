@@ -1,22 +1,23 @@
-# Безопасность
+# Security
 
-## Как сообщить об уязвимости
+## Reporting a vulnerability
 
-Не через публичную задачу. Используйте **Security → Report a vulnerability**
-в этом репозитории — это приватный канал GitHub.
+Not through a public issue. Use **Security → Report a vulnerability** in this
+repository — that is GitHub's private channel.
 
-Ответ в течение недели. Если уязвимость подтверждается, исправление выходит
-отдельной версией, а описание публикуется после её выхода, а не до.
+A reply within a week. If the vulnerability is confirmed, the fix ships as a
+version of its own, and the description is published after that version is
+out, not before.
 
-## Что считается уязвимостью здесь
+## What counts as a vulnerability here
 
-Пакет говорит с сетью и загружает нативный код, поэтому к уязвимостям
-относятся: обход проверки сертификата, приём данных от неаутентифицированной
-стороны как доверенных, чтение или запись за границами буфера в нативной части,
-и загрузка библиотеки по пути, которым может управлять посторонний.
+The package talks to the network and loads native code, so the following count
+as vulnerabilities: bypassing certificate validation, accepting data from an
+unauthenticated party as trusted, reading or writing past the end of a buffer
+in the native part, and loading a library from a path an outsider can control.
 
-## Чем этот пакет не занимается
+## What this package does not do
 
-Он не хранит учётные данные и не решает, кому доверять. Сертификаты,
-их проверка и срок действия — ответственность вызывающей стороны. Пакет обязан
-лишь не ослаблять то, что ему передали.
+It does not store credentials and does not decide who to trust. Certificates,
+their validation and their expiry are the caller's responsibility. The package
+is obliged only not to weaken what it was handed.

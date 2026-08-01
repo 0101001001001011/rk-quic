@@ -1,18 +1,18 @@
-# Участие в разработке
+# Contributing
 
-## Откуда берётся код
+## Where the code comes from
 
-Этот репозиторий — **публичное зеркало**. Разработка идёт в приватном
-монорепозитории и переносится сюда через `git subtree`. Прямые коммиты в `main`
-здесь будут затёрты следующим переносом.
+This repository is a **public mirror**. Development happens in a private
+monorepo and is carried across with `git subtree`. Commits made directly to
+`main` here will be overwritten by the next transfer.
 
-Поэтому: ошибки и предложения — в задачи, изменения кода — через pull request,
-который переносится вручную в источник. Это неудобно, и это честнее, чем
-принимать правки, которые молча пропадут.
+So: bugs and suggestions go in issues, and code changes go through a pull
+request that is carried into the source by hand. That is inconvenient, and it
+is more honest than accepting changes that would silently disappear.
 
-## Что проверяется
+## What gets checked
 
-Всё, что делает CI, воспроизводится локально:
+Everything CI does is reproducible locally:
 
 ```bash
 dart pub get
@@ -21,14 +21,14 @@ dart analyze --fatal-infos
 dart pub publish --dry-run
 ```
 
-Последняя команда — не про релиз. Пакет, который нельзя опубликовать, ломает
-сборку сразу, а не в день выпуска.
+The last command is not about releasing. A package that cannot be published
+breaks the build immediately rather than on the day of the release.
 
-## Версии
+## Versions
 
-Семантические, строго. Смена ABI нативной части — это **major**, даже если
-сигнатуры на стороне Dart не изменились: у потребителя меняется то, что он
-загружает во время выполнения.
+Semantic, strictly. A change to the native ABI is **major**, even when no
+signature on the Dart side changed: what the consumer loads at run time is now
+a different thing.
 
-Запись в `CHANGELOG.md` пишется тем же коммитом, что и подъём версии, и
-описывает, что изменилось **для потребителя**, а не что происходило внутри.
+The `CHANGELOG.md` entry is written in the same commit as the version bump, and
+describes what changed **for the consumer**, not what went on inside.
