@@ -38,6 +38,22 @@ set(RK_CARGO_DIR "${CMAKE_CURRENT_BINARY_DIR}/cargo")
 set(RK_OUT "${RK_CARGO_DIR}/${RK_TRIPLE}/release/${RK_LIB_FILE}")
 set(RK_CRATE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../rust")
 
+# Globbed, not listed. A hand-written DEPENDS silently stops covering a source
+# added later, and the failure mode is the worst one available: the build is
+# green and the library is stale.
+#
+# Measured 2026-08-03. The list here named Cargo.toml, lib.rs, ffi.rs and
+# status.rs, while the crate had eight sources: config.rs, event.rs,
+# server_ffi.rs, testing.rs and transport.rs were outside it — including
+# server_ffi.rs, where the server entry points live. `touch src/server_ffi.rs`
+# followed by `cmake --build` ran cargo not at all, so Flutter kept shipping
+# the previous rk_quic.dll. `touch src/lib.rs` rebuilt in 6.6 s, which is why
+# the gap never showed.
+#
+# The other six rk_* packages have used this glob from the start; this one was
+# the exception.
+file(GLOB_RECURSE RK_CRATE_SOURCES CONFIGURE_DEPENDS "${RK_CRATE_DIR}/src/*.rs")
+
 add_custom_command(
   OUTPUT "${RK_OUT}"
   COMMAND ${CMAKE_COMMAND} -E env
@@ -45,10 +61,7 @@ add_custom_command(
           --target ${RK_TRIPLE}
           --target-dir "${RK_CARGO_DIR}"
   WORKING_DIRECTORY "${RK_CRATE_DIR}"
-  DEPENDS "${RK_CRATE_DIR}/Cargo.toml"
-          "${RK_CRATE_DIR}/src/lib.rs"
-          "${RK_CRATE_DIR}/src/ffi.rs"
-          "${RK_CRATE_DIR}/src/status.rs"
+  DEPENDS "${RK_CRATE_DIR}/Cargo.toml" ${RK_CRATE_SOURCES}
   COMMENT "cargo build --release --target ${RK_TRIPLE}"
   VERBATIM
 )
