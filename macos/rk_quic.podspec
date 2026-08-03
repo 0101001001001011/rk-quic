@@ -31,7 +31,25 @@ pod framework so `dart:ffi` can open it as rk_quic.framework/rk_quic.
     'DEFINES_MODULE' => 'YES',
     # See the iOS podspec: Dart resolves these symbols at runtime, so nothing
     # at link time references them and only `-force_load` keeps them.
-    'OTHER_LDFLAGS' => '-force_load ${BUILT_PRODUCTS_DIR}/librk_quic.a',
+    # `-framework Security -framework CoreFoundation`, и здесь есть ловушка.
+    #
+    # Rust-staticlib не несёт LC_LINKER_OPTION, поэтому директивы линковки,
+    # которые cargo применил бы сам, теряются, когда линкует Xcode.
+    #
+    # ЛОВУШКА: в RELEASE эти флаги не нужны -- LTO выбрасывает объекты
+    # rustls-native-certs целиком, потому что ни один путь от #[no_mangle]
+    # точек входа до load_native_certs() не доходит (`ar t | grep -c
+    # security_framework` = 0). В DEBUG нет LTO, объекты остаются, и голая
+    # линковка падает на 289 неразрешённых символах. OTHER_LDFLAGS одна на
+    # обе конфигурации, поэтому написан DEBUG-набор.
+    #
+    # Измерено 2026-08-03. Померив только Release, эта строка осталась бы
+    # пустой и ломала бы каждую отладочную сборку потребителя.
+    #
+    # Цепочка: wtransport 0.7.1 -> rustls-native-certs 0.8.4 ->
+    # security-framework 3.7.0. В ios/rk_quic.podspec этого НЕТ: на iOS
+    # security-framework отсутствует в графе зависимостей вовсе.
+    'OTHER_LDFLAGS' => '-force_load ${BUILT_PRODUCTS_DIR}/librk_quic.a -framework Security -framework CoreFoundation',
   }
   s.swift_version = '5.0'
 end

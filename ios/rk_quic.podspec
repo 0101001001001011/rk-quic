@@ -38,6 +38,12 @@ pod framework so `dart:ffi` can open it as rk_quic.framework/rk_quic.
     # `-force_load`, not `-l`: nothing in Objective-C or Swift references the
     # Rust symbols — Dart looks them up by name at runtime — so a plain link
     # would drop every object in the archive as unused.
+    # Только `-force_load`, и это измерено, а не забыто: 2026-08-03 архив
+    # слинкован с ПУСТЫМ набором фреймворков на всех трёх Apple-платформах,
+    # а на macOS полученный бинарник ещё и запущен. Ни Security, ни
+    # CoreFoundation, ни SystemConfiguration этому пакету не нужны.
+    # Добавить фреймворк «на всякий случай» -- значит заявить зависимость,
+    # которой нет.
     'OTHER_LDFLAGS' => '-force_load ${BUILT_PRODUCTS_DIR}/librk_quic.a',
   }
   s.swift_version = '5.0'
