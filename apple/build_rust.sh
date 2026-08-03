@@ -18,17 +18,17 @@
 # because no Objective-C or Swift code calls it — the caller is Dart, at
 # runtime, by name.
 #
-# NOT VERIFIED BY A BUILD. There is no Mac on this project. Everything above is
-# read off the tools; the file is here so the Apple path is a stated design
-# with a named failure mode rather than a blank.
+# VERIFIED BY A BUILD, 2026-08-03, on Apple M4 / macOS 26.2 / Xcode 26.2 /
+# rustc 1.97.1. Before that day not one line about Apple in this package had
+# ever been compiled.
 #
-# The likeliest failure is NOT any of the above. It is `aws-lc-sys`, which
-# builds C and needs CMake and a compiler it can find for the target. On
-# Android the same step works only once both CARGO_TARGET_<TRIPLE>_LINKER and
-# AR_<triple> are set — without the second, `cc-rs` looks for a tool named
-# `<triple>-ar` that the NDK does not ship, and the error names a program
-# rather than the missing variable. Expect the same shape here under different
-# names, and set them below rather than in someone's ~/.cargo/config.toml.
+# The prediction below was half right. `aws-lc-sys` WAS the failure point --
+# aarch64-apple-ios did not link at all -- but neither
+# CARGO_TARGET_<TRIPLE>_LINKER nor AR_<triple> was involved: unlike the NDK,
+# Apple ships one clang and one ar that cc-rs finds through xcrun. What it
+# needed was a deployment target, and the reason is further down: libSystem
+# hides ___chkstk_darwin through iOS 12.1 while rustc defaults this triple to
+# 10.0.
 
 set -eu
 

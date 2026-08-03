@@ -108,7 +108,7 @@ somebody else's branch.
 | Windows | built and called: `rk_quic.dll` (3.5 MB) next to the runner |
 | Linux | built and called: `librk_quic.so` (5.3 MB) in `bundle/lib/`; the whole test suite, including a live WebTransport session, is green |
 | Android | built and packaged: `librk_quic.so` in `lib/{armeabi-v7a,arm64-v8a,x86_64}` inside the APK (2.3–5.3 MB per slice) |
-| macOS, iOS | **written, but not confirmed by a build** — there is no Mac available, see `doc/native-build.md` |
+| macOS, iOS | **built and linked** — verified 2026-08-03 on macOS 26.2 / Xcode 26.2, Release and Debug, all three Apple platforms; see `doc/native-build.md` |
 | Web | no native part, by design: the browser is a client of this endpoint, not its host |
 
 Importing this package from code that also builds for web is safe: `dart:ffi`

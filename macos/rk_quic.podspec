@@ -1,7 +1,12 @@
 #
-# NOT VERIFIED BY A BUILD — there is no Mac on this project. See
-# ../apple/build_rust.sh for the reasoning and ../doc/native-build.md for what
-# would have to be checked first on a machine that has Xcode.
+# Verified 2026-08-03 on Apple M4 / macOS 26.2 / Xcode 26.2 / rustc 1.97.1:
+# macosx (arm64+x86_64), iphoneos (arm64) and iphonesimulator (arm64+x86_64)
+# each link a C probe against the OTHER_LDFLAGS below, in BOTH Release and
+# Debug, and the macOS binaries were run through the C ABI. Before that day not
+# one line here had ever been compiled.
+#
+# The Apple build is now gated by the `packages-apple` job in the root CI of
+# the monorepo. See ../apple/build_rust.sh and ../doc/native-build.md.
 #
 Pod::Spec.new do |s|
   s.name             = 'rk_quic'
@@ -40,8 +45,10 @@ pod framework so `dart:ffi` can open it as rk_quic.framework/rk_quic.
     # rustls-native-certs целиком, потому что ни один путь от #[no_mangle]
     # точек входа до load_native_certs() не доходит (`ar t | grep -c
     # security_framework` = 0). В DEBUG нет LTO, объекты остаются, и голая
-    # линковка падает на 289 неразрешённых символах. OTHER_LDFLAGS одна на
-    # обе конфигурации, поэтому написан DEBUG-набор.
+    # линковка падает на 377 неразрешённых символах: 289 даёт отсутствие
+    # Security, 88 -- CoreFoundation, и ни один из двух по отдельности не
+    # спасает. OTHER_LDFLAGS одна на обе конфигурации, поэтому написан
+    # DEBUG-набор.
     #
     # Измерено 2026-08-03. Померив только Release, эта строка осталась бы
     # пустой и ломала бы каждую отладочную сборку потребителя.
