@@ -131,10 +131,13 @@ lipo -create $SLICES -output "$BUILT_PRODUCTS_DIR/librk_quic.a"
 # at run time, when Dart looks a symbol up by name. That is the failure this
 # check exists to turn into a build error.
 #
-# `nm -gU` is used on the ARCHIVE here deliberately, and it works because the
-# invocation above emits a single crate type: with `lto = true` and an rlib in
-# the mix the objects carry __LLVM,__bitcode, and Apple's nm rejects the whole
-# object with "Unknown attribute kind (102)".
+# `nm -gU` is used on the ARCHIVE here deliberately. It does NOT read the
+# archive cleanly: measured 2026-08-03, nm still rejects 34 objects with
+# "Unknown attribute kind (102)" -- every one of them compiler_builtins out of
+# the Rust sysroot -- which is why stderr goes to /dev/null. What the single
+# crate type buys is that the ONE object carrying the #[no_mangle] entry points
+# is a readable Mach-O; with `rlib` also emitted that object is
+# __LLVM,__bitcode too and the grep below finds nothing.
 if ! nm -gU "$BUILT_PRODUCTS_DIR/librk_quic.a" 2>/dev/null | grep -q " _rk_quic_abi_version$"; then
   echo "rk_quic: librk_quic.a carries no rk_quic_abi_version -- the C ABI did not survive the build" >&2
   exit 1
