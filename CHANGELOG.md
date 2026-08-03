@@ -1,3 +1,7 @@
+## 0.1.1
+
+- Two fixes that reach every platform, not only Apple. The Windows and Linux build listed its Rust sources by hand and missed five of eight, so editing the server never rebuilt the library and a stale one shipped. On Apple the pod script phase shipped with CRLF and exited 0 without building; the archive carried none of its 9 exported symbols; aarch64-apple-ios did not link; and macOS Debug builds need Security and CoreFoundation, which the podspec did not name.
+
 ## 0.1.0
 
 The first version with a native part — and a QUIC endpoint that speaks first.
