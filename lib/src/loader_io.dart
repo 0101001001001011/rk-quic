@@ -32,6 +32,16 @@ typedef _VersionDart = ffi.Pointer<Utf8> Function();
 
 /// The file names to try, in order, on this platform.
 ///
+/// Stands for the host process image rather than a file on disk.
+///
+/// On Apple the native part is a static archive linked into the pod
+/// framework, so on some deployments there is no file to open and the symbols
+/// are simply already in the process. Handled as a candidate rather than as a
+/// special case so it goes through the same ABI and symbol checks as every
+/// other candidate — a process that never linked this library is then refused
+/// by name instead of being accepted because a handle came back.
+const String processImageCandidate = '<process image>';
+
 /// Order matters: an explicit path beats convention, so an operator or a test
 /// can always override without editing the package.
 List<String> defaultCandidatePaths() {
@@ -44,11 +54,17 @@ List<String> defaultCandidatePaths() {
     candidates.add('rk_quic.dll');
   } else if (Platform.isMacOS || Platform.isIOS) {
     // With `use_frameworks!` the pod is a framework and the binary lives
-    // inside it — see apple/build_rust.sh. Not verified by a build: there is
-    // no Mac on this project.
+    // inside it — see apple/build_rust.sh, which produces a STATIC archive
+    // that the podspec pulls in with `-force_load`. Verified by a build
+    // 2026-08-03 on macOS 26.2 / Xcode 26.2.
+    //
+    // [processImageCandidate] last: the archive can also end up linked
+    // straight into the host, and then there is no file to open at all. It is
+    // a name rather than a path, and `probeNativeLibrary` recognises it.
     candidates
       ..add('rk_quic.framework/rk_quic')
-      ..add('librk_quic.dylib');
+      ..add('librk_quic.dylib')
+      ..add(processImageCandidate);
   } else {
     // Android and Linux. On Android the system loader finds it in the APK's
     // lib directory by bare name; on Linux the Flutter bundle puts it in
@@ -85,7 +101,9 @@ NativeProbe probeNativeLibrary({
   for (final path in candidates) {
     final ffi.DynamicLibrary library;
     try {
-      library = ffi.DynamicLibrary.open(path);
+      library = path == processImageCandidate
+          ? ffi.DynamicLibrary.process()
+          : ffi.DynamicLibrary.open(path);
     } on Object catch (error) {
       // `DynamicLibrary.open` throws ArgumentError on most platforms and other
       // types on some; catching Object is deliberate rather than lazy, because
