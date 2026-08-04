@@ -1,6 +1,6 @@
 # Shell scripts must reach a Mac with LF endings.
 #
-# Measured twice. On 2026-08-03 the build script went to pub.dev with CRLF and
+# Measured twice. On 2026-08-03 a build script went to pub.dev with CRLF and
 # exited zero having built nothing. On 2026-08-04 the same script, checked out
 # on Windows, killed a macOS build on its first line:
 #
