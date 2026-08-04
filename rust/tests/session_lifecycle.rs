@@ -178,6 +178,141 @@ fn a_browser_style_client_opens_a_session_is_spoken_to_first_and_its_departure_i
     assert_eq!(transport::remove(handle), Status::Ok);
 }
 
+/// The other half of the point: **the till can answer where it was asked**.
+///
+/// A unidirectional stream carries a message and ends; there is nowhere to
+/// reply. Everything the browser terminal needs — a question with an answer, a
+/// subscription, a long run reporting progress — needs the reply to land in the
+/// stream the question arrived on, or the client cannot tell which of several
+/// exchanges in flight it belongs to. That is what is proved here, over a real
+/// socket, end to end.
+#[test]
+fn a_question_on_a_bidirectional_stream_is_answered_in_that_same_stream() {
+    let (chain_pem, key_pem) = self_signed();
+    let digest = digest_of(&chain_pem);
+
+    let config = ServerConfig {
+        bind_address: "127.0.0.1:0".into(),
+        certificate_chain_pem: chain_pem,
+        private_key_pem: key_pem,
+        path: "/rk".into(),
+        idle_timeout_ms: 10_000,
+    }
+    .parse()
+    .expect("configuration");
+
+    let handle = transport::start(config).expect("endpoint starts");
+    let server = transport::lookup(handle).expect("handle resolves");
+    let port = server.local_port();
+
+    let runtime = tokio::runtime::Runtime::new().expect("client runtime");
+
+    let connection = runtime.block_on(async {
+        let client = Endpoint::client(
+            ClientConfig::builder()
+                .with_bind_default()
+                .with_server_certificate_hashes([digest])
+                .build(),
+        )
+        .expect("client endpoint");
+        client
+            .connect(format!("https://127.0.0.1:{port}/rk"))
+            .await
+            .expect("session opens")
+    });
+
+    let Some(Event::SessionOpened { session_id, .. }) =
+        wait_for(&server, Duration::from_secs(10), |event| {
+            matches!(event, Event::SessionOpened { .. })
+        })
+    else {
+        panic!("the server never saw the session open");
+    };
+
+    // --- the client asks -----------------------------------------------------
+
+    let (mut client_send, mut client_recv) = runtime.block_on(async {
+        connection
+            .open_bi()
+            .await
+            .expect("a bidirectional stream")
+            .await
+            .expect("the peer accepted it")
+    });
+    let client_stream_id = client_send.id().into_u64();
+
+    runtime.block_on(async {
+        client_send
+            .write_all(b"which shift is open?")
+            .await
+            .expect("write");
+        // The question is complete, so the asking side ends. The *answering*
+        // side must not: that is the difference from a unidirectional stream.
+        client_send.finish().await.expect("finish");
+    });
+
+    let Some(Event::StreamOpened {
+        session_id: opened_session,
+        stream_id: opened_stream,
+    }) = wait_for(&server, Duration::from_secs(10), |event| {
+        matches!(event, Event::StreamOpened { .. })
+    })
+    else {
+        panic!("the server never saw the bidirectional stream open");
+    };
+    assert_eq!(opened_session, session_id);
+    assert_eq!(
+        opened_stream, client_stream_id,
+        "the two ends disagree about which stream this is, so a reply would \
+         be addressed to a stream that does not exist"
+    );
+
+    let Some(Event::StreamData {
+        stream_id, utf8, ..
+    }) = wait_for(&server, Duration::from_secs(10), |event| {
+        matches!(event, Event::StreamData { .. })
+    })
+    else {
+        panic!("the question never reached the server");
+    };
+    assert_eq!(utf8, "which shift is open?");
+    assert_eq!(stream_id, client_stream_id);
+
+    // --- the till answers into the stream it was asked on ---------------------
+
+    assert_eq!(
+        server.stream_send(session_id, stream_id, "shift 41, opened 09:02"),
+        Ok(()),
+        "the till could not write back into a stream that is open"
+    );
+    assert_eq!(server.stream_close(session_id, stream_id), Ok(()));
+
+    let heard = runtime.block_on(async {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            use tokio::io::AsyncReadExt;
+            let mut text = String::new();
+            client_recv.read_to_string(&mut text).await.expect("read");
+            text
+        })
+        .await
+        .expect("the client never heard the answer")
+    });
+    assert_eq!(heard, "shift 41, opened 09:02");
+
+    // Closed means forgotten, not merely finished: a stream map that only ever
+    // grows is a leak that tracks the number of exchanges, which on a till is
+    // every operation of every shift.
+    assert_eq!(
+        server.stream_send(session_id, stream_id, "too late"),
+        Err(Status::UnknownHandle),
+        "a closed stream is still accepting writes"
+    );
+
+    runtime.shutdown_background();
+    drop(server);
+    assert_eq!(transport::remove(handle), Status::Ok);
+}
+
 #[test]
 fn a_client_asking_for_the_wrong_path_never_becomes_a_session() {
     let (chain_pem, key_pem) = self_signed();

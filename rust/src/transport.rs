@@ -25,7 +25,7 @@ use std::time::Duration;
 
 use rustls_pki_types::PrivateKeyDer;
 use wtransport::tls::{Certificate, CertificateChain, PrivateKey};
-use wtransport::{Connection, Identity, VarInt};
+use wtransport::{Connection, Identity, SendStream, VarInt};
 
 use crate::config::ParsedConfig;
 use crate::event::Event;
@@ -40,11 +40,22 @@ use crate::status::Status;
 /// the one that matters.
 const EVENT_QUEUE_DEPTH: usize = 1024;
 
+/// The writable halves of the bidirectional streams peers opened, by
+/// `(session, stream)`.
+///
+/// A `SendStream` cannot be cloned the way a `Connection` can, so it is shared
+/// rather than copied: the outer lock is held only long enough to look the
+/// stream up, and the write itself waits on the inner one. Holding the outer
+/// lock across a network write would stall the accept loop — a tokio worker
+/// blocking on a std mutex — every time one browser was slow.
+type LiveStreams = Arc<Mutex<HashMap<(u64, u64), Arc<tokio::sync::Mutex<SendStream>>>>>;
+
 /// A live endpoint.
 pub struct Endpoint {
     runtime: Option<tokio::runtime::Runtime>,
     events: Mutex<Receiver<Event>>,
     sessions: Arc<Mutex<HashMap<u64, Connection>>>,
+    streams: LiveStreams,
     local_port: u16,
 }
 
@@ -105,6 +116,56 @@ impl Endpoint {
                 .send_datagram(payload.as_bytes())
                 .map_err(|_| Status::PeerGone)
         }
+    }
+
+    /// Writes one frame back into a bidirectional stream the peer opened.
+    ///
+    /// The stream is **not** finished here, and that is the whole difference
+    /// from [`Endpoint::send`]: an exchange may be one answer, a subscription
+    /// producing until the peer goes away, or a run reporting progress and then
+    /// a result. Deciding it is over is [`Endpoint::stream_close`], separately.
+    ///
+    /// `unknownHandle` means there is no such stream — it was closed, or the
+    /// session it belonged to ended. That is a fact about the peer rather than
+    /// a fault, and it arrives as a value (И144).
+    pub fn stream_send(&self, session_id: u64, stream_id: u64, payload: &str) -> Result<(), Status> {
+        let stream = {
+            let streams = self.streams.lock().map_err(|_| Status::Panic)?;
+            streams.get(&(session_id, stream_id)).cloned()
+        };
+        let Some(stream) = stream else {
+            return Err(Status::UnknownHandle);
+        };
+        let runtime = self.runtime.as_ref().ok_or(Status::NotRunning)?;
+        let payload = payload.to_owned();
+        runtime.block_on(async move {
+            let mut stream = stream.lock().await;
+            stream
+                .write_all(payload.as_bytes())
+                .await
+                .map_err(|_| Status::PeerGone)
+        })
+    }
+
+    /// Finishes this side of a bidirectional stream and forgets it.
+    ///
+    /// Forgetting is not tidiness. Without it the map keeps one entry per
+    /// exchange that ever happened, which on a till is every operation of every
+    /// shift — a leak that grows exactly with use, and so is invisible in a
+    /// short test and fatal in a long day.
+    pub fn stream_close(&self, session_id: u64, stream_id: u64) -> Result<(), Status> {
+        let stream = {
+            let mut streams = self.streams.lock().map_err(|_| Status::Panic)?;
+            streams.remove(&(session_id, stream_id))
+        };
+        let Some(stream) = stream else {
+            return Err(Status::UnknownHandle);
+        };
+        let runtime = self.runtime.as_ref().ok_or(Status::NotRunning)?;
+        runtime.block_on(async move {
+            let mut stream = stream.lock().await;
+            stream.finish().await.map_err(|_| Status::PeerGone)
+        })
     }
 }
 
@@ -214,12 +275,21 @@ pub fn start(config: ParsedConfig) -> Result<u64, (Status, String)> {
 
     let (tx, rx) = mpsc::sync_channel(EVENT_QUEUE_DEPTH);
     let sessions: Arc<Mutex<HashMap<u64, Connection>>> = Arc::new(Mutex::new(HashMap::new()));
+    let streams: LiveStreams = Arc::new(Mutex::new(HashMap::new()));
 
     let accept_sessions = Arc::clone(&sessions);
+    let accept_streams = Arc::clone(&streams);
     let accept_tx = tx.clone();
     let expected_path = config.path.clone();
     runtime.spawn(async move {
-        accept_loop(endpoint, expected_path, accept_sessions, accept_tx).await;
+        accept_loop(
+            endpoint,
+            expected_path,
+            accept_sessions,
+            accept_streams,
+            accept_tx,
+        )
+        .await;
     });
 
     let handle = next_handle();
@@ -227,6 +297,7 @@ pub fn start(config: ParsedConfig) -> Result<u64, (Status, String)> {
         runtime: Some(runtime),
         events: Mutex::new(rx),
         sessions,
+        streams,
         local_port,
     };
     match registry().lock() {
@@ -290,12 +361,14 @@ async fn accept_loop(
     endpoint: wtransport::Endpoint<wtransport::endpoint::endpoint_side::Server>,
     expected_path: String,
     sessions: Arc<Mutex<HashMap<u64, Connection>>>,
+    streams: LiveStreams,
     tx: SyncSender<Event>,
 ) {
     let next_session = Arc::new(AtomicU64::new(1));
     loop {
         let incoming = endpoint.accept().await;
         let sessions = Arc::clone(&sessions);
+        let streams = Arc::clone(&streams);
         let tx = tx.clone();
         let expected_path = expected_path.clone();
         let next_session = Arc::clone(&next_session);
@@ -334,16 +407,41 @@ async fn accept_loop(
                 },
             );
 
-            session_loop(session_id, connection, &tx).await;
+            let reason = session_loop(session_id, connection, Arc::clone(&streams), &tx).await;
 
             if let Ok(mut map) = sessions.lock() {
                 map.remove(&session_id);
             }
+            // Every stream this session owned goes with it. A stream outlives
+            // the connection it was opened on only in a map, and writing to
+            // one would be `peerGone` forever — so it is a leak that grows with
+            // shifts and never a useful handle again.
+            if let Ok(mut map) = streams.lock() {
+                map.retain(|(owner, _), _| *owner != session_id);
+            }
+            // Announced only *after* both maps have forgotten it, and the order
+            // is the guarantee. `sessionClosed` tells the caller to stop
+            // writing; if the session were still in the map at that moment, a
+            // write racing the reader would be accepted into a connection that
+            // is already gone. This was measured: under three concurrent
+            // sessions the emit-then-remove order let a send succeed after its
+            // own close event had been read.
+            emit(&tx, Event::SessionClosed { session_id, reason });
         });
     }
 }
 
-async fn session_loop(session_id: u64, connection: Connection, tx: &SyncSender<Event>) {
+/// Serves one session until it ends, and returns why it ended.
+///
+/// The reason is returned rather than announced here on purpose: the caller
+/// forgets the session first and emits `sessionClosed` afterwards, so the event
+/// is never ahead of the fact it reports.
+async fn session_loop(
+    session_id: u64,
+    connection: Connection,
+    streams: LiveStreams,
+    tx: &SyncSender<Event>,
+) -> String {
     use tokio::io::AsyncReadExt;
 
     loop {
@@ -354,10 +452,7 @@ async fn session_loop(session_id: u64, connection: Connection, tx: &SyncSender<E
                         emit(tx, Event::Datagram { session_id, utf8: text.to_string() });
                     }
                 }
-                Err(error) => {
-                    emit(tx, Event::SessionClosed { session_id, reason: error.to_string() });
-                    return;
-                }
+                Err(error) => return error.to_string(),
             },
             stream = connection.accept_uni() => match stream {
                 Ok(mut stream) => {
@@ -371,13 +466,63 @@ async fn session_loop(session_id: u64, connection: Connection, tx: &SyncSender<E
                         }
                     }
                 }
-                Err(error) => {
-                    emit(tx, Event::SessionClosed { session_id, reason: error.to_string() });
-                    return;
+                Err(error) => return error.to_string(),
+            },
+            stream = connection.accept_bi() => match stream {
+                Ok((send, recv)) => {
+                    // Both halves of a bidirectional stream carry the same id,
+                    // so the peer and the till name the exchange identically —
+                    // which is what lets an answer be addressed at all.
+                    let stream_id = send.id().into_u64();
+                    if let Ok(mut map) = streams.lock() {
+                        map.insert(
+                            (session_id, stream_id),
+                            Arc::new(tokio::sync::Mutex::new(send)),
+                        );
+                    }
+                    emit(tx, Event::StreamOpened { session_id, stream_id });
+                    // Read on its own task, not here. A subscription's stream
+                    // stays open for as long as the operator watches it, and
+                    // reading it inline would freeze this loop for that whole
+                    // time — no datagrams, no further streams, and no
+                    // `sessionClosed` when the peer finally vanished.
+                    tokio::spawn(read_bi_stream(session_id, stream_id, recv, tx.clone()));
                 }
+                Err(error) => return error.to_string(),
             },
         }
     }
+}
+
+/// Drains one bidirectional stream the peer opened.
+///
+/// The message is read whole before it becomes an event, for the same reason
+/// a unidirectional one is: half a message is worse than none, because it
+/// looks like a whole one. Reaching the end means the peer finished its side —
+/// it has nothing more to say — which is reported as `streamClosed`. The
+/// till's own half is untouched and stays writable until it decides otherwise.
+async fn read_bi_stream(
+    session_id: u64,
+    stream_id: u64,
+    mut recv: wtransport::RecvStream,
+    tx: SyncSender<Event>,
+) {
+    use tokio::io::AsyncReadExt;
+
+    let mut buffer = Vec::new();
+    if recv.read_to_end(&mut buffer).await.is_ok() {
+        if let Ok(text) = String::from_utf8(buffer) {
+            emit(
+                &tx,
+                Event::StreamData {
+                    session_id,
+                    stream_id,
+                    utf8: text,
+                },
+            );
+        }
+    }
+    emit(&tx, Event::StreamClosed { session_id, stream_id });
 }
 
 /// Queues an event, dropping the oldest when full.
@@ -477,6 +622,24 @@ mod tests {
         let endpoint = lookup(handle).unwrap();
         assert_eq!(endpoint.send(999, "x", true), Err(Status::UnknownHandle));
         assert_eq!(endpoint.send(999, "x", false), Err(Status::UnknownHandle));
+        drop(endpoint);
+        assert_eq!(remove(handle), Status::Ok);
+    }
+
+    #[test]
+    fn writing_to_a_stream_that_is_gone_is_a_status_and_not_a_panic() {
+        // A shut laptop lid is an ordinary state, not a fault. The refusal has
+        // to arrive as a value: a panic here would unwind through the FFI
+        // boundary on a till, and a till that crashed cannot take money.
+        let handle = start(config_on(0)).expect("start");
+        let endpoint = lookup(handle).unwrap();
+
+        assert_eq!(
+            endpoint.stream_send(999, 1, "{}"),
+            Err(Status::UnknownHandle)
+        );
+        assert_eq!(endpoint.stream_close(999, 1), Err(Status::UnknownHandle));
+
         drop(endpoint);
         assert_eq!(remove(handle), Status::Ok);
     }
