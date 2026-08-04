@@ -92,7 +92,7 @@ mod tests {
     #[test]
     fn abi_version_is_the_declared_generation() {
         assert_eq!(rk_quic_abi_version(), RK_QUIC_ABI_VERSION);
-        assert_eq!(RK_QUIC_ABI_VERSION, 1);
+        assert_eq!(RK_QUIC_ABI_VERSION, 2);
     }
 
     #[test]
