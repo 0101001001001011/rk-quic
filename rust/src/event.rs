@@ -46,6 +46,28 @@ pub enum Event {
     /// A complete message arrived on a unidirectional stream. Ordered and
     /// reliable — this is the path for changes that must not be dropped.
     StreamMessage { session_id: u64, utf8: String },
+    /// A peer opened a bidirectional stream.
+    ///
+    /// Everything that follows belongs to *this* stream, and the answer has to
+    /// go back into it — which is why the identity travels on every one of the
+    /// three events and not only on the first. A session id alone would not do:
+    /// a browser can have several exchanges in flight at once, and without the
+    /// stream there is no way to say which reply answers which question.
+    StreamOpened { session_id: u64, stream_id: u64 },
+    /// A complete message arrived on a bidirectional stream.
+    ///
+    /// Unlike [`Event::StreamMessage`] the stream is not over: an exchange can
+    /// be a question and an answer, a subscription that goes on producing, or
+    /// a long run reporting its progress.
+    StreamData {
+        session_id: u64,
+        stream_id: u64,
+        utf8: String,
+    },
+    /// The peer finished its side of a bidirectional stream. For a subscription
+    /// this *is* the unsubscribe, and it needs no message of its own — a tab
+    /// that was closed cannot send one.
+    StreamClosed { session_id: u64, stream_id: u64 },
     /// The endpoint stopped accepting because of an error of its own. The
     /// endpoint is still a valid handle and still has to be stopped.
     EndpointError { message: String },
@@ -60,6 +82,9 @@ impl Event {
             Event::SessionClosed { .. } => "sessionClosed",
             Event::Datagram { .. } => "datagram",
             Event::StreamMessage { .. } => "streamMessage",
+            Event::StreamOpened { .. } => "streamOpened",
+            Event::StreamData { .. } => "streamData",
+            Event::StreamClosed { .. } => "streamClosed",
             Event::EndpointError { .. } => "endpointError",
         }
     }
@@ -92,6 +117,19 @@ mod tests {
             Event::EndpointError {
                 message: "x".into(),
             },
+            Event::StreamOpened {
+                session_id: 1,
+                stream_id: 2,
+            },
+            Event::StreamData {
+                session_id: 1,
+                stream_id: 2,
+                utf8: "x".into(),
+            },
+            Event::StreamClosed {
+                session_id: 1,
+                stream_id: 2,
+            },
         ];
         for event in cases {
             let json: serde_json::Value =
@@ -102,6 +140,40 @@ mod tests {
                 "the wire tag and Event::kind disagree for {event:?}"
             );
         }
+    }
+
+    #[test]
+    fn bidirectional_events_carry_the_stream_they_belong_to() {
+        // The identity of the stream is the whole reason a bidirectional
+        // exchange exists: without it there is nothing to answer *into*, and
+        // the till would have to guess which of a browser's open questions a
+        // reply belongs to.
+        let opened = Event::StreamOpened {
+            session_id: 7,
+            stream_id: 3,
+        };
+        assert_eq!(opened.kind(), "streamOpened");
+
+        let json = serde_json::to_string(&Event::StreamData {
+            session_id: 7,
+            stream_id: 3,
+            utf8: "{}".to_owned(),
+        })
+        .unwrap();
+        assert!(json.contains("\"streamId\":3"), "no stream in the frame: {json}");
+        assert!(
+            json.contains("\"sessionId\":7"),
+            "no session in the frame: {json}"
+        );
+
+        assert_eq!(
+            Event::StreamClosed {
+                session_id: 7,
+                stream_id: 3,
+            }
+            .kind(),
+            "streamClosed"
+        );
     }
 
     #[test]
