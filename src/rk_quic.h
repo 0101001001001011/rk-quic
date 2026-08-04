@@ -102,7 +102,10 @@ const char *rk_quic_server_local_port(uint64_t handle, uint16_t *out_port);
  * rk_quic_string_free. On any other status nothing was allocated.
  *
  * Event JSON carries a "kind" NAME — "sessionOpened", "sessionClosed",
- * "datagram", "streamMessage", "endpointError" — never a number. */
+ * "datagram", "streamMessage", "streamOpened", "streamData", "streamClosed",
+ * "endpointError" — never a number. The three stream* kinds also carry a
+ * "streamId": a session may have several exchanges open at once, and only the
+ * stream says which one a reply belongs to. */
 const char *rk_quic_server_poll(uint64_t handle, uint32_t timeout_ms,
                                 char **out_json);
 
@@ -116,6 +119,32 @@ const char *rk_quic_server_poll(uint64_t handle, uint32_t timeout_ms,
  * than a fault, and the signal to stop writing to it. */
 const char *rk_quic_session_send(uint64_t handle, uint64_t session_id,
                                  const char *payload_utf8, uint8_t reliable);
+
+/* Writes UTF-8 into a bidirectional stream a peer opened, without ending it.
+ *
+ * The unit is the stream and not the session: a browser may have several
+ * exchanges open on one session at once, and only stream_id says which
+ * question this answers. The ids arrive on the "streamOpened", "streamData"
+ * and "streamClosed" events.
+ *
+ * The stream is deliberately NOT finished here — an exchange may be one
+ * answer, a subscription that goes on producing, or a run reporting progress.
+ * Ending it is rk_quic_stream_close, and it is a separate decision.
+ *
+ * "unknownHandle" means no such endpoint, or no such stream on it — closed, or
+ * its session ended. "peerGone" means the write itself found the peer absent.
+ * Both are facts about the peer rather than faults. */
+const char *rk_quic_stream_send(uint64_t handle, uint64_t session_id,
+                                uint64_t stream_id, const char *payload_utf8);
+
+/* Finishes this side of a bidirectional stream and forgets it.
+ *
+ * Closing something already closed is "unknownHandle" rather than a failure,
+ * for the same reason stopping a stopped endpoint is "notRunning": during
+ * teardown a second close is ordinary, and making it an error only teaches
+ * callers to ignore the return value. */
+const char *rk_quic_stream_close(uint64_t handle, uint64_t session_id,
+                                 uint64_t stream_id);
 
 #ifdef __cplusplus
 }

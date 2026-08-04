@@ -48,6 +48,8 @@ void main() {
           'rk_quic_server_local_port',
           'rk_quic_server_poll',
           'rk_quic_session_send',
+          'rk_quic_stream_send',
+          'rk_quic_stream_close',
         }),
       );
 
@@ -117,6 +119,46 @@ void main() {
       // a lookup fails, so a clean `loaded` is the assertion.
       final probe = probeNativeLibrary(candidatePaths: [path]);
       expect(probe.outcome, NativeLoadOutcome.loaded, reason: probe.toString());
+    });
+  });
+
+  group('the two halves of QuicServer present one surface', () {
+    test('every method on the native half exists on the browser half', () {
+      // `server_io.dart` and `server_web.dart` are chosen by a conditional
+      // import, so nothing type-checks one against the other: code compiled
+      // for both ends would simply fail to build on whichever half was
+      // forgotten. That is the drift this catches, and it is the reason the
+      // browser half answers `unsupported` rather than omitting the method.
+      final io = File(
+        '${_packageRoot()}/lib/src/server_io.dart',
+      ).readAsStringSync();
+      final web = File(
+        '${_packageRoot()}/lib/src/server_web.dart',
+      ).readAsStringSync();
+
+      Set<String> answeringMethodsOf(String source) =>
+          RegExp(r'Future<RkQuicStatus>\s+(\w+)\s*\(')
+              .allMatches(source)
+              .map((m) => m.group(1)!)
+              .toSet();
+
+      final onNative = answeringMethodsOf(io);
+      expect(
+        onNative,
+        isNotEmpty,
+        reason: 'the server_io.dart parse found nothing',
+      );
+      expect(
+        onNative,
+        containsAll(<String>{'send', 'sendOn', 'closeStream', 'stop'}),
+      );
+      expect(
+        answeringMethodsOf(web),
+        onNative,
+        reason:
+            'the two halves disagree, so a caller compiled for both ends '
+            'would learn which one it got',
+      );
     });
   });
 

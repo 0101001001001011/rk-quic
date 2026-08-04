@@ -48,7 +48,10 @@ export 'src/quic_event.dart'
         QuicEvent,
         SessionClosed,
         SessionOpened,
+        StreamClosed,
+        StreamData,
         StreamMessageReceived,
+        StreamOpened,
         UnknownQuicEvent;
 export 'src/server.dart' show QuicServer, QuicServerConfig, QuicServerStart;
 export 'src/status.dart'

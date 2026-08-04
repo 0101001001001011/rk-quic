@@ -80,5 +80,16 @@ class QuicServer {
     bool reliable = true,
   }) async => RkQuicStatus.unsupported;
 
+  /// Present so the two halves are one surface, never reachable here: without
+  /// an endpoint there is no stream a peer could have opened on it.
+  Future<RkQuicStatus> sendOn(
+    int sessionId,
+    int streamId,
+    String message,
+  ) async => RkQuicStatus.unsupported;
+
+  Future<RkQuicStatus> closeStream(int sessionId, int streamId) async =>
+      RkQuicStatus.unsupported;
+
   Future<RkQuicStatus> stop() async => RkQuicStatus.unsupported;
 }
