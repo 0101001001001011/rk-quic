@@ -196,6 +196,24 @@ void main() {
       },
     );
 
+    test('a field of the wrong type is absent, not an exception', () {
+      // The helper reading these fields is shared by every kind, and it used
+      // `as int?` — which throws on a String rather than yielding null. It
+      // runs on the poll isolate, where an exception is reported nowhere and
+      // stops the transport, so one oddly-typed field would have looked like
+      // "events stopped arriving". Found by the bidirectional-event tests.
+      expect(
+        QuicEvent.fromJson('{"kind":"datagram","sessionId":"three","utf8":7}'),
+        isA<DatagramReceived>()
+            .having((e) => e.sessionId, 'sessionId', -1)
+            .having((e) => e.message, 'message', ''),
+      );
+      expect(
+        QuicEvent.fromJson('{"kind":"sessionOpened","sessionId":[],"path":1}'),
+        isA<SessionOpened>().having((e) => e.sessionId, 'sessionId', -1),
+      );
+    });
+
     test('malformed JSON is an event, not an exception out of an isolate', () {
       for (final json in <String>['', 'not json', '[]', '{}', '{"kind":7}']) {
         expect(() => QuicEvent.fromJson(json), returnsNormally, reason: json);

@@ -181,6 +181,47 @@ class QuicServer {
     return reply is _StatusReply ? reply.status : RkQuicStatus.unrecognised;
   }
 
+  /// Writes one frame into a bidirectional stream the peer opened.
+  ///
+  /// The stream stays open. Which kind of exchange this is — an answer, a
+  /// subscription, a run reporting progress — belongs to the caller and not to
+  /// the transport, so ending it is a separate call to [closeStream].
+  ///
+  /// The ids come from [StreamOpened] and [StreamData]. Answering the session
+  /// instead of the stream would leave a browser with several questions in
+  /// flight unable to tell which reply is which, which is the whole reason
+  /// this is not [send].
+  ///
+  /// [RkQuicStatus.unknownHandle] means the stream is gone — closed, or its
+  /// session ended. [RkQuicStatus.peerGone] means the write found the peer
+  /// absent. Both are facts about the peer, not faults, and both are the
+  /// signal to stop producing for it.
+  Future<RkQuicStatus> sendOn(
+    int sessionId,
+    int streamId,
+    String message,
+  ) async {
+    if (_stopped) return RkQuicStatus.notRunning;
+    final reply = await _commands.send(
+      _StreamSendCommand(sessionId, streamId, message),
+    );
+    return reply is _StatusReply ? reply.status : RkQuicStatus.unrecognised;
+  }
+
+  /// Finishes this side of a bidirectional stream.
+  ///
+  /// Calling it twice is not an error: the second call answers
+  /// [RkQuicStatus.unknownHandle], because during teardown a second close is
+  /// ordinary and making it a failure only teaches callers to ignore the
+  /// return value.
+  Future<RkQuicStatus> closeStream(int sessionId, int streamId) async {
+    if (_stopped) return RkQuicStatus.notRunning;
+    final reply = await _commands.send(
+      _StreamCloseCommand(sessionId, streamId),
+    );
+    return reply is _StatusReply ? reply.status : RkQuicStatus.unrecognised;
+  }
+
   /// Stops the endpoint and frees everything it owns.
   ///
   /// Calling it twice is not an error. Never throws.
@@ -296,6 +337,19 @@ class _SendCommand {
   final bool reliable;
 }
 
+class _StreamSendCommand {
+  const _StreamSendCommand(this.sessionId, this.streamId, this.message);
+  final int sessionId;
+  final int streamId;
+  final String message;
+}
+
+class _StreamCloseCommand {
+  const _StreamCloseCommand(this.sessionId, this.streamId);
+  final int sessionId;
+  final int streamId;
+}
+
 class _StopCommand {
   const _StopCommand();
 }
@@ -370,6 +424,37 @@ void _commandLoop(_CommandStart start) {
         } finally {
           malloc.free(payload);
         }
+
+      case _StreamSendCommand(:final sessionId, :final streamId, :final message):
+        final payload = message.toNativeUtf8();
+        try {
+          final status = statusFromWireName(
+            bindings
+                .streamSend(handle, sessionId, streamId, payload)
+                .toDartString(),
+          );
+          start.reply.send(
+            _StatusReply(
+              status,
+              status == RkQuicStatus.ok ? null : bindings.takeLastError(),
+            ),
+          );
+        } finally {
+          // Allocated by Dart, freed by Dart (И146). The native side borrowed
+          // it for the length of the call and never took ownership.
+          malloc.free(payload);
+        }
+
+      case _StreamCloseCommand(:final sessionId, :final streamId):
+        final status = statusFromWireName(
+          bindings.streamClose(handle, sessionId, streamId).toDartString(),
+        );
+        start.reply.send(
+          _StatusReply(
+            status,
+            status == RkQuicStatus.ok ? null : bindings.takeLastError(),
+          ),
+        );
 
       case _StopCommand():
         final status = statusFromWireName(

@@ -53,6 +53,18 @@ typedef _SendNative =
       ffi.Uint8,
     );
 typedef SendDart = ffi.Pointer<Utf8> Function(int, int, ffi.Pointer<Utf8>, int);
+typedef _StreamSendNative =
+    ffi.Pointer<Utf8> Function(
+      ffi.Uint64,
+      ffi.Uint64,
+      ffi.Uint64,
+      ffi.Pointer<Utf8>,
+    );
+typedef StreamSendDart =
+    ffi.Pointer<Utf8> Function(int, int, int, ffi.Pointer<Utf8>);
+typedef _StreamCloseNative =
+    ffi.Pointer<Utf8> Function(ffi.Uint64, ffi.Uint64, ffi.Uint64);
+typedef StreamCloseDart = ffi.Pointer<Utf8> Function(int, int, int);
 
 /// Every entry point of the native library, resolved once.
 class RkQuicBindings {
@@ -87,7 +99,15 @@ class RkQuicBindings {
           .asFunction<PollDart>(),
       sessionSend = _library
           .lookup<ffi.NativeFunction<_SendNative>>('rk_quic_session_send')
-          .asFunction<SendDart>();
+          .asFunction<SendDart>(),
+      streamSend = _library
+          .lookup<ffi.NativeFunction<_StreamSendNative>>('rk_quic_stream_send')
+          .asFunction<StreamSendDart>(),
+      streamClose = _library
+          .lookup<ffi.NativeFunction<_StreamCloseNative>>(
+            'rk_quic_stream_close',
+          )
+          .asFunction<StreamCloseDart>();
 
   // ignore: unused_field
   final ffi.DynamicLibrary _library;
@@ -101,6 +121,8 @@ class RkQuicBindings {
   final LocalPortDart serverLocalPort;
   final PollDart serverPoll;
   final SendDart sessionSend;
+  final StreamSendDart streamSend;
+  final StreamCloseDart streamClose;
 
   /// Reads and clears the last error, freeing the buffer the library allocated.
   ///
