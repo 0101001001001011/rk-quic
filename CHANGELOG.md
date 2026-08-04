@@ -1,3 +1,32 @@
+## 0.2.0
+
+- Bidirectional streams: an exchange can now be a question and its answer, a
+  subscription, or a run reporting progress. C ABI generation 2.
+- `server.events` gains `streamOpened`, `streamData` and `streamClosed`, each
+  carrying a `streamId` alongside the session. A session is not an exchange: a
+  browser may have several questions in flight at once, and only the stream
+  says which answer belongs to which.
+- `QuicServer.sendOn(sessionId, streamId, message)` writes back into the stream
+  a peer opened **without ending it**; `QuicServer.closeStream()` ends it. Which
+  kind of exchange it is belongs to the caller, not to the transport.
+- **`StreamClosed` is not an unsubscribe.** The endpoint reads a message whole
+  before reporting it, so it learns of a request only once the client has
+  finished writing — and the event therefore arrives immediately behind
+  `StreamData`, identically for a one-off question and for a subscription meant
+  to last an hour. Treating it as "the client went away" cancels every
+  subscription the moment it is created. A peer that really has gone is learned
+  from a write refused with `peerGone`, and from `sessionClosed`.
+- `sessionClosed` now leaves the queue only after the session has been
+  forgotten. The previous order was racy: under concurrent sessions a send
+  could succeed after its own close event had already been read.
+- An event field of the wrong type no longer throws. The reader used a cast,
+  which threw instead of yielding null, on the isolate where nothing would have
+  reported it — so one oddly-typed field from a newer library looked like
+  "events stopped arriving" rather than like one odd event.
+- C ABI generation is **2**: `rk_quic_stream_send` and `rk_quic_stream_close`
+  were added. A Dart side written against generation 2 refuses a generation-1
+  library by name rather than dying on a missing symbol.
+
 ## 0.1.0
 
 The first version with a native part — and a QUIC endpoint that speaks first.
