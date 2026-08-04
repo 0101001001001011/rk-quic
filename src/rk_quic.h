@@ -36,7 +36,7 @@ extern "C" {
 /* Generation of this ABI. Bumped when a signature or an ownership rule
  * changes — not when the package version changes. A caller that does not know
  * the generation it finds must refuse the library rather than guess. */
-#define RK_QUIC_ABI_VERSION 1
+#define RK_QUIC_ABI_VERSION 2
 
 /* Returns the generation the loaded library implements. Cannot fail. */
 uint32_t rk_quic_abi_version(void);

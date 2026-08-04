@@ -25,7 +25,13 @@ use crate::status::Status;
 /// Bumped whenever a signature or an ownership rule changes — not when the
 /// package version changes. The Dart side refuses to use a library whose
 /// generation it does not know, which is the "version mismatch" failure path.
-pub const RK_QUIC_ABI_VERSION: u32 = 1;
+///
+/// 1 → 2: bidirectional streams. `rk_quic_stream_send` and
+/// `rk_quic_stream_close` were added, and three event kinds with them. A Dart
+/// side that knows generation 2 would otherwise resolve a missing symbol in a
+/// generation-1 library and take the till down with it, which is the one
+/// failure this constant exists to turn into a sentence.
+pub const RK_QUIC_ABI_VERSION: u32 = 2;
 
 /// Package version, NUL-terminated, in `static` storage.
 ///

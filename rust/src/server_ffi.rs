@@ -199,6 +199,73 @@ pub unsafe extern "C" fn rk_quic_session_send(
     })
 }
 
+/// Writes UTF-8 into a bidirectional stream a peer opened, without ending it.
+///
+/// Named `stream` and not `session` because that is the unit: a browser can
+/// have several exchanges open on one session at once, and only the stream says
+/// which question this answers. The stream ids come from the `streamOpened`,
+/// `streamData` and `streamClosed` events.
+///
+/// The stream is deliberately **not** finished — an exchange may be one answer,
+/// a subscription that goes on producing, or a run reporting progress. Ending
+/// it is [`rk_quic_stream_close`], and it is a separate decision.
+///
+/// `"unknownHandle"` means no such endpoint, or no such stream on it — closed,
+/// or its session ended. `"peerGone"` means the write itself found the peer
+/// absent. Both are facts about the peer, not faults, and both arrive as values
+/// (И144).
+///
+/// # Safety
+/// `payload_utf8` must be a valid NUL-terminated string.
+#[no_mangle]
+pub unsafe extern "C" fn rk_quic_stream_send(
+    handle: u64,
+    session_id: u64,
+    stream_id: u64,
+    payload_utf8: *const c_char,
+) -> *const c_char {
+    // SAFETY: promised by the caller; the borrow does not outlive this call.
+    let payload = unsafe { borrow_c_string(payload_utf8) };
+    guard(move || {
+        clear_last_error();
+        let Some(payload) = payload else {
+            set_last_error("payloadUtf8 is null or not UTF-8");
+            return Status::InvalidArgument;
+        };
+        let Some(endpoint) = transport::lookup(handle) else {
+            return Status::UnknownHandle;
+        };
+        match endpoint.stream_send(session_id, stream_id, payload) {
+            Ok(()) => Status::Ok,
+            Err(status) => status,
+        }
+    })
+}
+
+/// Finishes this side of a bidirectional stream and forgets it.
+///
+/// Closing something already closed is `"unknownHandle"` rather than a failure,
+/// for the same reason stopping a stopped endpoint is `"notRunning"`: during
+/// teardown a second close is ordinary, and making it an error only teaches
+/// callers to ignore the return value.
+#[no_mangle]
+pub extern "C" fn rk_quic_stream_close(
+    handle: u64,
+    session_id: u64,
+    stream_id: u64,
+) -> *const c_char {
+    guard(move || {
+        clear_last_error();
+        let Some(endpoint) = transport::lookup(handle) else {
+            return Status::UnknownHandle;
+        };
+        match endpoint.stream_close(session_id, stream_id) {
+            Ok(()) => Status::Ok,
+            Err(status) => status,
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -343,6 +410,46 @@ mod tests {
     }
 
     #[test]
+    fn the_abi_generation_moved_because_the_surface_grew() {
+        // Not politeness. A Dart side that knows about bidirectional streams
+        // calls symbols a generation-1 library does not export; without this
+        // the process would die resolving a missing symbol instead of saying
+        // plainly that the library is the wrong one.
+        assert_eq!(crate::RK_QUIC_ABI_VERSION, 2);
+    }
+
+    #[test]
+    fn writing_to_a_stream_on_an_unknown_handle_is_a_value_and_not_a_crash() {
+        let payload = CString::new("{}").unwrap();
+        // SAFETY: valid string; the handle is deliberately one never issued.
+        let status = unsafe { rk_quic_stream_send(u64::MAX, 1, 1, payload.as_ptr()) };
+        assert_eq!(status_of(status), "unknownHandle");
+
+        assert_eq!(
+            status_of(rk_quic_stream_close(u64::MAX, 1, 1)),
+            "unknownHandle"
+        );
+    }
+
+    #[test]
+    fn a_stream_that_the_session_never_opened_is_unknown_handle() {
+        // A live endpoint, a stream nobody opened: the refusal must come from
+        // the stream being absent, not from the endpoint being absent, or the
+        // test above would pass over a library that ignores its arguments.
+        let json = valid_config(0);
+        let mut handle = 0u64;
+        // SAFETY: valid string, writable out-pointer.
+        unsafe { rk_quic_server_start(json.as_ptr(), &mut handle) };
+
+        let payload = CString::new("{}").unwrap();
+        // SAFETY: valid string.
+        let status = unsafe { rk_quic_stream_send(handle, 7, 3, payload.as_ptr()) };
+        assert_eq!(status_of(status), "unknownHandle");
+
+        assert_eq!(status_of(rk_quic_server_stop(handle)), "ok");
+    }
+
+    #[test]
     fn every_entry_point_survives_a_null_out_pointer() {
         let json = valid_config(0);
         let mut handle = 0u64;
@@ -361,6 +468,10 @@ mod tests {
             );
             assert_eq!(
                 status_of(rk_quic_session_send(handle, 1, std::ptr::null(), 1)),
+                "invalidArgument"
+            );
+            assert_eq!(
+                status_of(rk_quic_stream_send(handle, 1, 1, std::ptr::null())),
                 "invalidArgument"
             );
         }

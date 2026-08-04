@@ -15,7 +15,7 @@ import 'native_probe.dart';
 ///
 /// Must equal `RK_QUIC_ABI_VERSION` in `src/rk_quic.h` and
 /// `rust/src/ffi.rs`. `test/abi_surface_test.dart` fails when they drift.
-const int rkQuicAbiVersion = 1;
+const int rkQuicAbiVersion = 2;
 
 /// Environment variable naming an explicit library file.
 ///
