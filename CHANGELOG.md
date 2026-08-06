@@ -1,3 +1,24 @@
+## 0.2.1
+
+- **An endpoint bound to an IPv6 address now asks for dual stack explicitly**,
+  instead of leaving `IPV6_V6ONLY` at whatever the operating system defaults to.
+  `[::]:4433` used to mean every address on Linux and only the IPv6 half of them
+  on Windows, with nothing on either side saying which — and the missing half is
+  the one a browser reaches first, because Windows resolves a machine name and
+  `localhost` to IPv6 ahead of IPv4.
+- The failure this fixes was silent in both directions. A client on the family
+  the socket did not carry sent packets and heard nothing: Chrome reports
+  `QUIC_NETWORK_IDLE_TIMEOUT` with `num_undecryptable_packets: 0`, and a
+  `wtransport` client simply times out after thirty seconds. `curl` is no help
+  at all — it answers 200 through an address the browser cannot use, because it
+  picks a family differently.
+- `tests/dual_stack.rs` holds it there: one listener on `[::]:0`, a real
+  WebTransport client over `[::1]` and over `127.0.0.1`, both required to open a
+  session. Measured failing before the change on Windows 11 (the IPv4 half timed
+  out), passing after.
+- No ABI change: generation 2, and `QuicServerConfig` is untouched. A caller
+  that was passing `0.0.0.0` gets exactly what it did before.
+
 ## 0.2.0
 
 - Bidirectional streams: an exchange can now be a question and its answer, a

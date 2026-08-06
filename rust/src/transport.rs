@@ -18,12 +18,14 @@
 
 use std::collections::HashMap;
 use std::io;
+use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, TrySendError};
 use std::sync::{mpsc, Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use rustls_pki_types::PrivateKeyDer;
+use wtransport::config::Ipv6DualStackConfig;
 use wtransport::tls::{Certificate, CertificateChain, PrivateKey};
 use wtransport::{Connection, Identity, SendStream, VarInt};
 
@@ -233,9 +235,32 @@ pub fn live_count() -> usize {
 pub fn start(config: ParsedConfig) -> Result<u64, (Status, String)> {
     let identity = identity_from(&config)?;
 
-    let server_config = wtransport::ServerConfig::builder()
-        .with_bind_address(config.bind)
-        .with_identity(identity)
+    // An IPv6 bind is asked for dual stack **explicitly**, and that is not a
+    // refinement.
+    //
+    // `with_bind_address` maps an IPv6 address to `Ipv6DualStackConfig::OsDefault`,
+    // which means "do not touch IPV6_V6ONLY" — and the OS default differs by
+    // OS. Measured 2026-08-06 on Windows 11: a UDP socket bound to `::` with
+    // the option untouched receives IPv6 datagrams only; a packet sent to
+    // `127.0.0.1` on the same port never arrives, and binding `0.0.0.0` on
+    // that port afterwards succeeds, which is the same fact from the other
+    // side. On Linux the default is the opposite. So `[::]:4433` would be
+    // every address on one host and half of them on another, with nothing
+    // saying which — and the half that goes missing is the half a browser
+    // picks first, since Windows resolves a machine name to IPv6 ahead of
+    // IPv4.
+    //
+    // `Allow` on a *specific* IPv6 address (`[::1]`) changes nothing, so this
+    // needs no condition beyond the family: the option only has meaning on the
+    // wildcard.
+    let builder = wtransport::ServerConfig::builder();
+    let server_config = match config.bind {
+        SocketAddr::V6(address) => {
+            builder.with_bind_address_v6(address, Ipv6DualStackConfig::Allow)
+        }
+        SocketAddr::V4(_) => builder.with_bind_address(config.bind),
+    }
+    .with_identity(identity)
         // Both, and neither is optional.
         //
         // Without `max_idle_timeout` a peer that vanishes without a close —
