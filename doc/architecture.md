@@ -36,7 +36,7 @@ our server side is in Dart.
 - Enumerations cross the boundary **by name**, never by number: a number changes
   meaning the moment a case is inserted into the middle of a list.
 
-All four hold in 0.1.0. The endpoint, the sessions and the events are
+All four hold in 0.2.1. The endpoint, the sessions and the events are
 implemented on quinn; the reasoning for quinn over quiche, the outcome table for
 loading the library, and what has actually been proved on which platform are in
 the README, and the build mechanism is in `doc/native-build.md`.

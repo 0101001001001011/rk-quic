@@ -9,9 +9,11 @@ gets the right to speak first.** A change in the state of a print job, a device
 that appeared or failed, reaches a browser client at the moment of the event
 rather than the next time somebody asks.
 
-## What 0.1.0 can do
+## What 0.2.1 can do
 
-Serve WebTransport to a browser — and **speak first**.
+Serve WebTransport to a browser — and **speak first**. Since 0.2.0 an exchange
+can also be a bidirectional stream, so an answer can be told apart from the
+question it belongs to when several are in flight at once.
 
 ```dart
 import 'package:rk_quic/rk_quic.dart';
@@ -44,13 +46,22 @@ Everything here that blocks — waiting for an event and sending reliably — li
 on helper isolates: the interface isolate makes not one call into the native
 part.
 
+## Bind to `[::]` to reach both families
+
+`0.0.0.0` is IPv4 and nothing else. `[::]` is **both**, and since 0.2.1 that is
+true on every operating system rather than on some of them: the endpoint now
+asks for dual stack explicitly instead of leaving `IPV6_V6ONLY` at a default
+that Linux and Windows disagree about. This matters more than it sounds, because
+a browser resolves `localhost` and a machine name to IPv6 first — under the old
+behaviour a Windows host answered `curl` and left Chrome timing out.
+
 The order of work was chosen deliberately: first an empty library was made to
 arrive at every reachable target, and only then was the transport laid on top of
 a proven mechanism. An empty library has no reasons of its own to fail, so a red
 build meant a broken pipeline and nothing else.
 
 ```dart
-print(rkQuicVersion);       // 0.1.0 — read out of the loaded library
+print(rkQuicVersion);       // 0.2.1 — read out of the loaded library
 print(hasNativeTransport);  // true if it opened and the ABI generation agreed
 ```
 
