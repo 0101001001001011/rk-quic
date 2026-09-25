@@ -9,9 +9,19 @@
 //! [`ffi`] holds the C ABI and its ownership rules, [`status`] the closed set
 //! of statuses, [`transport`] the endpoint, and [`server_ffi`] the endpoint's
 //! entry points.
+//!
+//! The client half ([`client_config`], [`client_ffi`]) was added in 0.3.0 and
+//! is deliberately thin: a connected client registers in the **same** endpoint
+//! registry and emits the **same** events, so polling, writing into a stream
+//! and closing one are the entry points that already existed. Only connecting
+//! and opening a stream are new. Two registries or two event vocabularies
+//! would be two places for the halves to disagree, and they would disagree at
+//! run time, on a live exchange, rather than at the build.
 
 #![deny(unsafe_op_in_unsafe_fn)]
 
+pub mod client_config;
+pub mod client_ffi;
 pub mod config;
 pub mod event;
 pub mod ffi;

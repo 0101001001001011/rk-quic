@@ -66,6 +66,31 @@ typedef _StreamCloseNative =
     ffi.Pointer<Utf8> Function(ffi.Uint64, ffi.Uint64, ffi.Uint64);
 typedef StreamCloseDart = ffi.Pointer<Utf8> Function(int, int, int);
 
+// The client half, 0.3.0. Only two: everything after a connection — polling,
+// writing, finishing a stream, stopping — is the same call on both sides,
+// because a connected client is an endpoint with one session in it. See
+// `client_ffi.rs`.
+typedef _ClientConnectNative =
+    ffi.Pointer<Utf8> Function(
+      ffi.Pointer<Utf8>,
+      ffi.Pointer<ffi.Uint64>,
+      ffi.Pointer<ffi.Uint64>,
+    );
+typedef ClientConnectDart =
+    ffi.Pointer<Utf8> Function(
+      ffi.Pointer<Utf8>,
+      ffi.Pointer<ffi.Uint64>,
+      ffi.Pointer<ffi.Uint64>,
+    );
+typedef _ClientOpenStreamNative =
+    ffi.Pointer<Utf8> Function(
+      ffi.Uint64,
+      ffi.Uint64,
+      ffi.Pointer<ffi.Uint64>,
+    );
+typedef ClientOpenStreamDart =
+    ffi.Pointer<Utf8> Function(int, int, ffi.Pointer<ffi.Uint64>);
+
 /// Every entry point of the native library, resolved once.
 class RkQuicBindings {
   RkQuicBindings(this._library)
@@ -107,7 +132,17 @@ class RkQuicBindings {
           .lookup<ffi.NativeFunction<_StreamCloseNative>>(
             'rk_quic_stream_close',
           )
-          .asFunction<StreamCloseDart>();
+          .asFunction<StreamCloseDart>(),
+      clientConnect = _library
+          .lookup<ffi.NativeFunction<_ClientConnectNative>>(
+            'rk_quic_client_connect',
+          )
+          .asFunction<ClientConnectDart>(),
+      clientOpenStream = _library
+          .lookup<ffi.NativeFunction<_ClientOpenStreamNative>>(
+            'rk_quic_client_open_stream',
+          )
+          .asFunction<ClientOpenStreamDart>();
 
   // ignore: unused_field
   final ffi.DynamicLibrary _library;
@@ -123,6 +158,8 @@ class RkQuicBindings {
   final SendDart sessionSend;
   final StreamSendDart streamSend;
   final StreamCloseDart streamClose;
+  final ClientConnectDart clientConnect;
+  final ClientOpenStreamDart clientOpenStream;
 
   /// Reads and clears the last error, freeing the buffer the library allocated.
   ///

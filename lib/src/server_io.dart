@@ -1,4 +1,8 @@
-// The endpoint, driven from Dart — and never from the interface isolate.
+// The server half, driven from Dart — and never from the interface isolate.
+//
+// The isolates, the poll loop and the reply-by-id matching live in
+// `endpoint_io.dart`: since 0.3.0 the client half needs every one of them, and
+// a second copy would be a second place to fix one defect.
 //
 // **И145 is the shape of this file.** Two things here would stall a UI: the
 // poll call blocks a thread until an event arrives or the wait runs out, and
@@ -13,15 +17,10 @@
 // hung.
 
 import 'dart:async';
-import 'dart:convert';
-import 'dart:ffi' as ffi;
 import 'dart:isolate';
 
-import 'package:ffi/ffi.dart' show Utf8, calloc, malloc;
-import 'package:ffi/ffi.dart' show StringUtf8Pointer, Utf8Pointer;
 
-import 'bindings_io.dart';
-import 'loader_io.dart';
+import 'endpoint_io.dart';
 import 'quic_event.dart';
 import 'status.dart';
 
@@ -29,7 +28,7 @@ import 'status.dart';
 ///
 /// Not a latency: an event arriving during the wait returns at once. It is how
 /// long a stopped endpoint can take to notice it should exit, so it is short.
-const Duration _pollSlice = Duration(milliseconds: 200);
+const Duration pollSlice = Duration(milliseconds: 200);
 
 /// What a caller has to say to start an endpoint.
 class QuicServerConfig {
@@ -99,7 +98,7 @@ class QuicServerStart {
 class QuicServer {
   QuicServer._(this._commands, this._pollIsolate, this._events, this.port);
 
-  final _CommandChannel _commands;
+  final CommandChannel _commands;
   final Isolate _pollIsolate;
   final Stream<QuicEvent> _events;
 
@@ -119,7 +118,7 @@ class QuicServer {
     QuicServerConfig config, {
     List<String>? candidatePaths,
   }) async {
-    final commands = await _CommandChannel.spawn(candidatePaths);
+    final commands = await CommandChannel.spawn(candidatePaths);
     if (commands == null) {
       return const QuicServerStart._(
         RkQuicStatus.unsupported,
@@ -129,20 +128,20 @@ class QuicServer {
       );
     }
 
-    final started = await commands.send(_StartCommand(config.toJson()));
-    if (started is! _StartedReply) {
+    final started = await commands.send(StartCommand(config.toJson()));
+    if (started is! StartedReply) {
       await commands.dispose();
       return QuicServerStart._(
-        started is _StatusReply ? started.status : RkQuicStatus.unrecognised,
+        started is StatusReply ? started.status : RkQuicStatus.unrecognised,
         null,
-        started is _StatusReply ? started.detail : 'unexpected reply',
+        started is StatusReply ? started.detail : 'unexpected reply',
       );
     }
 
     final eventPort = ReceivePort();
     final pollIsolate = await Isolate.spawn(
-      _pollLoop,
-      _PollRequest(
+      pollLoop,
+      PollRequest(
         handle: started.handle,
         candidatePaths: candidatePaths,
         events: eventPort.sendPort,
@@ -176,9 +175,9 @@ class QuicServer {
   }) async {
     if (_stopped) return RkQuicStatus.notRunning;
     final reply = await _commands.send(
-      _SendCommand(sessionId, message, reliable),
+      SendCommand(sessionId, message, reliable),
     );
-    return reply is _StatusReply ? reply.status : RkQuicStatus.unrecognised;
+    return reply is StatusReply ? reply.status : RkQuicStatus.unrecognised;
   }
 
   /// Writes one frame into a bidirectional stream the peer opened.
@@ -203,9 +202,9 @@ class QuicServer {
   ) async {
     if (_stopped) return RkQuicStatus.notRunning;
     final reply = await _commands.send(
-      _StreamSendCommand(sessionId, streamId, message),
+      StreamSendCommand(sessionId, streamId, message),
     );
-    return reply is _StatusReply ? reply.status : RkQuicStatus.unrecognised;
+    return reply is StatusReply ? reply.status : RkQuicStatus.unrecognised;
   }
 
   /// Finishes this side of a bidirectional stream.
@@ -217,9 +216,9 @@ class QuicServer {
   Future<RkQuicStatus> closeStream(int sessionId, int streamId) async {
     if (_stopped) return RkQuicStatus.notRunning;
     final reply = await _commands.send(
-      _StreamCloseCommand(sessionId, streamId),
+      StreamCloseCommand(sessionId, streamId),
     );
-    return reply is _StatusReply ? reply.status : RkQuicStatus.unrecognised;
+    return reply is StatusReply ? reply.status : RkQuicStatus.unrecognised;
   }
 
   /// Stops the endpoint and frees everything it owns.
@@ -228,336 +227,12 @@ class QuicServer {
   Future<RkQuicStatus> stop() async {
     if (_stopped) return RkQuicStatus.notRunning;
     _stopped = true;
-    final reply = await _commands.send(const _StopCommand());
+    final reply = await _commands.send(const StopCommand());
     _pollIsolate.kill(priority: Isolate.immediate);
     await _commands.dispose();
-    return reply is _StatusReply ? reply.status : RkQuicStatus.unrecognised;
+    return reply is StatusReply ? reply.status : RkQuicStatus.unrecognised;
   }
 }
 
 // --- the isolates -----------------------------------------------------------
 
-class _PollRequest {
-  const _PollRequest({
-    required this.handle,
-    required this.candidatePaths,
-    required this.events,
-  });
-  final int handle;
-  final List<String>? candidatePaths;
-  final SendPort events;
-}
-
-/// The poller. Opens the library itself — an isolate cannot be handed a
-/// resolved function pointer, and re-opening an already-mapped file is cheap.
-void _pollLoop(_PollRequest request) {
-  final bindings = _openBindings(request.candidatePaths);
-  if (bindings == null) return;
-
-  final out = calloc<ffi.Pointer<Utf8>>();
-  try {
-    while (true) {
-      final status = statusFromWireName(
-        bindings
-            .serverPoll(request.handle, _pollSlice.inMilliseconds, out)
-            .toDartString(),
-      );
-      if (status == RkQuicStatus.ok) {
-        final pointer = out.value;
-        if (pointer != ffi.nullptr) {
-          final json = pointer.toDartString();
-          // Freed immediately, by the side that allocated it (И146). Holding
-          // it until the message is delivered would tie native memory to a
-          // Dart queue nobody is watching the length of.
-          bindings.stringFree(pointer);
-          out.value = ffi.nullptr;
-          request.events.send(json);
-        }
-        continue;
-      }
-      if (status == RkQuicStatus.wouldBlock) continue;
-      // unknownHandle means the endpoint was stopped: leaving is correct, and
-      // anything else here would spin.
-      return;
-    }
-  } finally {
-    calloc.free(out);
-  }
-}
-
-/// One isolate for the short calls, so they never queue behind a poll.
-///
-/// ## Every reply is addressed to the call that asked for it
-///
-/// Calls overlap: a server writes to many streams without awaiting one write
-/// before the next. Until 0.2.2 a call took "the next reply to arrive" from a
-/// broadcast stream, so two calls in flight both received the first reply and
-/// the second reply reached nobody. While everything succeeded that was
-/// invisible — `ok` handed to the wrong caller is still `ok`. When one call
-/// failed, its failure was handed to a healthy call beside it as well: a write
-/// into a stream the peer had abandoned (`peerGone`) made a concurrent write
-/// into a live subscription report `peerGone` too, and its caller closed a
-/// subscription that was working.
-///
-/// Hence an id on the way out and the same id on the way back. Matching by
-/// order would also be correct today, because the worker answers every command
-/// synchronously and in turn — but a single missing reply would then shift
-/// every later answer onto the wrong call, silently and for the rest of the
-/// process. With ids a missing reply costs exactly one call.
-class _CommandChannel {
-  _CommandChannel._(this._isolate, this._toWorker, Stream<Object?> replies) {
-    _replies = replies.listen((message) {
-      if (message is! _Reply) return;
-      _pending.remove(message.id)?.complete(message.payload);
-    });
-  }
-
-  final Isolate _isolate;
-  final SendPort _toWorker;
-  late final StreamSubscription<Object?> _replies;
-  final _pending = <int, Completer<Object?>>{};
-  var _nextId = 0;
-
-  static Future<_CommandChannel?> spawn(List<String>? candidatePaths) async {
-    final probe = probeNativeLibrary(candidatePaths: candidatePaths);
-    if (!probe.isUsable) return null;
-
-    final handshake = ReceivePort();
-    final isolate = await Isolate.spawn(
-      _commandLoop,
-      _CommandStart(handshake.sendPort, candidatePaths),
-      debugName: 'rk_quic-commands',
-    );
-    final replies = handshake.asBroadcastStream();
-    final toWorker = await replies.first as SendPort;
-    return _CommandChannel._(isolate, toWorker, replies);
-  }
-
-  Future<Object?> send(Object command) {
-    final id = _nextId++;
-    final reply = Completer<Object?>();
-    _pending[id] = reply;
-    _toWorker.send(_Envelope(id, command));
-    return reply.future;
-  }
-
-  Future<void> dispose() async {
-    _isolate.kill(priority: Isolate.immediate);
-    await _replies.cancel();
-    // A call still waiting when the worker is killed would otherwise wait
-    // forever. The same value a missing library gives: nothing was done.
-    final orphans = _pending.values.toList();
-    _pending.clear();
-    for (final orphan in orphans) {
-      orphan.complete(
-        const _StatusReply(RkQuicStatus.notRunning, 'the endpoint was stopped'),
-      );
-    }
-  }
-}
-
-/// A command and the id its reply will carry back.
-class _Envelope {
-  const _Envelope(this.id, this.command);
-  final int id;
-  final Object command;
-}
-
-/// A reply and the id of the command it answers.
-class _Reply {
-  const _Reply(this.id, this.payload);
-  final int id;
-  final Object? payload;
-}
-
-class _CommandStart {
-  const _CommandStart(this.reply, this.candidatePaths);
-  final SendPort reply;
-  final List<String>? candidatePaths;
-}
-
-class _StartCommand {
-  const _StartCommand(this.configJson);
-  final Map<String, Object?> configJson;
-}
-
-class _SendCommand {
-  const _SendCommand(this.sessionId, this.message, this.reliable);
-  final int sessionId;
-  final String message;
-  final bool reliable;
-}
-
-class _StreamSendCommand {
-  const _StreamSendCommand(this.sessionId, this.streamId, this.message);
-  final int sessionId;
-  final int streamId;
-  final String message;
-}
-
-class _StreamCloseCommand {
-  const _StreamCloseCommand(this.sessionId, this.streamId);
-  final int sessionId;
-  final int streamId;
-}
-
-class _StopCommand {
-  const _StopCommand();
-}
-
-class _StartedReply {
-  const _StartedReply(this.handle, this.port);
-  final int handle;
-  final int port;
-}
-
-class _StatusReply {
-  const _StatusReply(this.status, this.detail);
-  final RkQuicStatus status;
-  final String? detail;
-}
-
-void _commandLoop(_CommandStart start) {
-  final inbox = ReceivePort();
-  start.reply.send(inbox.sendPort);
-
-  final bindings = _openBindings(start.candidatePaths);
-  if (bindings == null) {
-    // Answered per command, not once up front: a reply nobody asked for has no
-    // call to be addressed to, and the call that did ask would wait forever.
-    inbox.listen((message) {
-      if (message is! _Envelope) return;
-      start.reply.send(
-        _Reply(
-          message.id,
-          const _StatusReply(RkQuicStatus.unsupported, 'no library'),
-        ),
-      );
-    });
-    return;
-  }
-
-  var handle = 0;
-
-  inbox.listen((envelope) {
-    if (envelope is! _Envelope) return;
-    final id = envelope.id;
-    final message = envelope.command;
-    switch (message) {
-      case _StartCommand(:final configJson):
-        final json = jsonEncode(configJson).toNativeUtf8();
-        final out = calloc<ffi.Uint64>();
-        try {
-          final status = statusFromWireName(
-            bindings.serverStart(json, out).toDartString(),
-          );
-          if (status != RkQuicStatus.ok) {
-            start.reply.send(
-              _Reply(id, _StatusReply(status, bindings.takeLastError())),
-            );
-            return;
-          }
-          handle = out.value;
-          final portOut = calloc<ffi.Uint16>();
-          try {
-            bindings.serverLocalPort(handle, portOut);
-            start.reply.send(_Reply(id, _StartedReply(handle, portOut.value)));
-          } finally {
-            calloc.free(portOut);
-          }
-        } finally {
-          // Allocated by Dart, freed by Dart. The native side never took it.
-          malloc.free(json);
-          calloc.free(out);
-        }
-
-      case _SendCommand(:final sessionId, :final message, :final reliable):
-        final payload = message.toNativeUtf8();
-        try {
-          final status = statusFromWireName(
-            bindings
-                .sessionSend(handle, sessionId, payload, reliable ? 1 : 0)
-                .toDartString(),
-          );
-          start.reply.send(
-            _Reply(
-              id,
-              _StatusReply(
-                status,
-                status == RkQuicStatus.ok ? null : bindings.takeLastError(),
-              ),
-            ),
-          );
-        } finally {
-          malloc.free(payload);
-        }
-
-      case _StreamSendCommand(
-        :final sessionId,
-        :final streamId,
-        :final message,
-      ):
-        final payload = message.toNativeUtf8();
-        try {
-          final status = statusFromWireName(
-            bindings
-                .streamSend(handle, sessionId, streamId, payload)
-                .toDartString(),
-          );
-          start.reply.send(
-            _Reply(
-              id,
-              _StatusReply(
-                status,
-                status == RkQuicStatus.ok ? null : bindings.takeLastError(),
-              ),
-            ),
-          );
-        } finally {
-          // Allocated by Dart, freed by Dart (И146). The native side borrowed
-          // it for the length of the call and never took ownership.
-          malloc.free(payload);
-        }
-
-      case _StreamCloseCommand(:final sessionId, :final streamId):
-        final status = statusFromWireName(
-          bindings.streamClose(handle, sessionId, streamId).toDartString(),
-        );
-        start.reply.send(
-          _Reply(
-            id,
-            _StatusReply(
-              status,
-              status == RkQuicStatus.ok ? null : bindings.takeLastError(),
-            ),
-          ),
-        );
-
-      case _StopCommand():
-        final status = statusFromWireName(
-          bindings.serverStop(handle).toDartString(),
-        );
-        start.reply.send(_Reply(id, _StatusReply(status, null)));
-
-      default:
-        start.reply.send(
-          _Reply(
-            id,
-            const _StatusReply(RkQuicStatus.unrecognised, 'unknown command'),
-          ),
-        );
-    }
-  });
-}
-
-RkQuicBindings? _openBindings(List<String>? candidatePaths) {
-  final probe = probeNativeLibrary(candidatePaths: candidatePaths);
-  if (!probe.isUsable || probe.path == null) return null;
-  try {
-    return RkQuicBindings(ffi.DynamicLibrary.open(probe.path!));
-  } on Object {
-    // The probe just opened it, so this only happens if the file changed
-    // underneath. Still a value: an isolate that throws reports nowhere.
-    return null;
-  }
-}

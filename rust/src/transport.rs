@@ -29,6 +29,7 @@ use wtransport::config::Ipv6DualStackConfig;
 use wtransport::tls::{Certificate, CertificateChain, PrivateKey};
 use wtransport::{Connection, Identity, SendStream, VarInt};
 
+use crate::client_config::ParsedClientConfig;
 use crate::config::ParsedConfig;
 use crate::event::Event;
 use crate::status::Status;
@@ -56,6 +57,8 @@ type LiveStreams = Arc<Mutex<HashMap<(u64, u64), Arc<tokio::sync::Mutex<SendStre
 pub struct Endpoint {
     runtime: Option<tokio::runtime::Runtime>,
     events: Mutex<Receiver<Event>>,
+    /// Kept so a reader spawned after start-up can emit. See [`Endpoint::event_sender`].
+    event_tx: SyncSender<Event>,
     sessions: Arc<Mutex<HashMap<u64, Connection>>>,
     streams: LiveStreams,
     local_port: u16,
@@ -65,6 +68,15 @@ impl Endpoint {
     /// The port actually bound. Interesting when the caller asked for 0.
     pub fn local_port(&self) -> u16 {
         self.local_port
+    }
+
+    /// A sender into this endpoint's event queue.
+    ///
+    /// Needed by [`open_stream`], which spawns a reader after the endpoint
+    /// already exists — the server never needs it because everything it
+    /// spawns is spawned while `start` still holds the sender.
+    fn event_sender(&self) -> SyncSender<Event> {
+        self.event_tx.clone()
     }
 
     /// Waits up to `timeout` for the next event.
@@ -321,6 +333,7 @@ pub fn start(config: ParsedConfig) -> Result<u64, (Status, String)> {
     let live = Endpoint {
         runtime: Some(runtime),
         events: Mutex::new(rx),
+        event_tx: tx,
         sessions,
         streams,
         local_port,
@@ -332,6 +345,204 @@ pub fn start(config: ParsedConfig) -> Result<u64, (Status, String)> {
         Err(_) => return Err((Status::Panic, "endpoint registry is poisoned".into())),
     }
     Ok(handle)
+}
+
+// --- connect ----------------------------------------------------------------
+
+/// Connects to a WebTransport endpoint, or says exactly why it could not.
+///
+/// # Why this returns the same kind of handle as [`start`]
+///
+/// Because everything after the connection is identical. A session is a
+/// `Connection` either way; a bidirectional stream is a `SendStream` and a
+/// `RecvStream` either way; an event is the same event. Giving the client its
+/// own registry and its own poll would mean two copies of the parts that do
+/// not differ, and they would drift — not at the build, which would be
+/// survivable, but on a live exchange, where a client and a till would
+/// disagree about what `streamClosed` means.
+///
+/// So a connected client **is** an [`Endpoint`] with one session in it, and
+/// `rk_quic_server_poll`, `rk_quic_stream_send` and `rk_quic_stream_close`
+/// serve it unchanged. The `server` in those names is historical and the cost
+/// of keeping it is a sentence like this one; the cost of renaming them would
+/// be an ABI break for every caller that already has them.
+pub fn connect(config: ParsedClientConfig) -> Result<(u64, u64), (Status, String)> {
+    // The certificate is trusted by its hash, exactly as the browser half
+    // trusts it (`serverCertificateHashes`). See `client_config`.
+    let client_config = wtransport::ClientConfig::builder()
+        .with_bind_default()
+        .with_server_certificate_hashes([wtransport::tls::Sha256Digest::new(
+            config.certificate_hash,
+        )])
+        .max_idle_timeout(Some(config.idle_timeout))
+        .map_err(|_| {
+            (
+                Status::InvalidArgument,
+                format!(
+                    "idleTimeoutMs {:?} is out of range for QUIC",
+                    config.idle_timeout
+                ),
+            )
+        })?
+        .keep_alive_interval(Some(config.idle_timeout / 3))
+        .build();
+
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .thread_name("rk_quic")
+        .build()
+        .map_err(|e| (Status::BindFailed, format!("no tokio runtime: {e}")))?;
+
+    // Creating the endpoint happens INSIDE the runtime, exactly as the server
+    // does it. quinn registers its socket with the tokio reactor at
+    // construction, and outside a runtime context that is a panic — "there is
+    // no reactor running" — not a returned error. Measured: the first
+    // redaction built the endpoint outside `block_on` and both tests panicked
+    // before a single packet.
+    //
+    // Connecting is in the same block and not on a task: a caller that asked
+    // to connect is entitled to know whether it worked, and reporting failure
+    // through the event queue would mean the call succeeded and the failure
+    // arrived later, to whoever happened to be polling.
+    let url = config.url.clone();
+    let (endpoint, connection) = runtime
+        .block_on(async move {
+            let endpoint = wtransport::Endpoint::client(client_config)
+                .map_err(|e| (Status::BindFailed, format!("no client endpoint: {e}")))?;
+            let connection = endpoint
+                .connect(url.as_str())
+                .await
+                .map_err(|e| (connect_status(&e), format!("connect {url}: {e}")))?;
+            Ok::<_, (Status, String)>((endpoint, connection))
+        })?;
+
+    let local_port = endpoint
+        .local_addr()
+        .map(|address| address.port())
+        .unwrap_or(0);
+
+    let (tx, rx) = mpsc::sync_channel(EVENT_QUEUE_DEPTH);
+    let sessions: Arc<Mutex<HashMap<u64, Connection>>> = Arc::new(Mutex::new(HashMap::new()));
+    let streams: LiveStreams = Arc::new(Mutex::new(HashMap::new()));
+
+    // One session, and its id is allocated from the same counter the server
+    // uses: an id that means something different on the two sides would be a
+    // trap for anything that logs both.
+    let session_id = next_handle();
+    if let Ok(mut map) = sessions.lock() {
+        map.insert(session_id, connection.clone());
+    }
+    emit(
+        &tx,
+        Event::SessionOpened {
+            session_id,
+            path: config.url.clone(),
+            authority: String::new(),
+        },
+    );
+
+    let loop_streams = Arc::clone(&streams);
+    let loop_sessions = Arc::clone(&sessions);
+    let loop_tx = tx.clone();
+    runtime.spawn(async move {
+        let reason = session_loop(session_id, connection, loop_streams, &loop_tx).await;
+        if let Ok(mut map) = loop_sessions.lock() {
+            map.remove(&session_id);
+        }
+        emit(&loop_tx, Event::SessionClosed { session_id, reason });
+    });
+
+    let handle = next_handle();
+    let live = Endpoint {
+        runtime: Some(runtime),
+        events: Mutex::new(rx),
+        event_tx: tx,
+        sessions,
+        streams,
+        local_port,
+    };
+    match registry().lock() {
+        Ok(mut map) => {
+            map.insert(handle, Arc::new(live));
+        }
+        Err(_) => return Err((Status::Panic, "endpoint registry is poisoned".into())),
+    }
+    // Both numbers, because the caller needs both and deriving one from the
+    // other would be a coupling nothing states. They are allocated one after
+    // the other from the same counter today; that is an implementation detail
+    // and must not become an interface.
+    Ok((handle, session_id))
+}
+
+/// Opens a bidirectional stream and returns its id.
+///
+/// # Why the client needs this and the server does not
+///
+/// On this wire the **terminal asks** and the till answers into the stream the
+/// terminal opened (`till_wire.dart`: "the answer goes into the stream, not to
+/// an id"). The server therefore only ever sees streams its peer opened, which
+/// `session_loop` already registers. The client is the side that opens them,
+/// and nothing existed for that.
+///
+/// The receiving half is drained by the same [`read_bi_stream`] the server
+/// uses, so a message is read whole before it becomes an event on both sides.
+pub fn open_stream(handle: u64, session_id: u64) -> Result<u64, (Status, String)> {
+    let endpoint = lookup(handle).ok_or((Status::UnknownHandle, "no such endpoint".into()))?;
+    let connection = {
+        let sessions = endpoint
+            .sessions
+            .lock()
+            .map_err(|_| (Status::Panic, "session registry is poisoned".into()))?;
+        sessions
+            .get(&session_id)
+            .cloned()
+            .ok_or((Status::UnknownHandle, format!("no session {session_id}")))?
+    };
+
+    let runtime = endpoint
+        .runtime
+        .as_ref()
+        .ok_or((Status::NotRunning, "endpoint is stopping".into()))?;
+
+    // Two awaits and two error types, kept apart on purpose: the first says
+    // the session would not give a stream (the peer is gone, or the limit is
+    // reached), the second says the stream was refused while opening. Folding
+    // them with `?` would need one error type and would report the first
+    // failure as the second.
+    let opening = runtime
+        .block_on(async { connection.open_bi().await })
+        .map_err(|e| (Status::PeerGone, format!("open stream: {e}")))?;
+    let (send, recv) = runtime
+        .block_on(async { opening.await })
+        .map_err(|e| (Status::PeerGone, format!("open stream: {e}")))?;
+
+    let stream_id = send.id().into_u64();
+    if let Ok(mut map) = endpoint.streams.lock() {
+        map.insert(
+            (session_id, stream_id),
+            Arc::new(tokio::sync::Mutex::new(send)),
+        );
+    }
+
+    let tx = endpoint.event_sender();
+    runtime.spawn(read_bi_stream(session_id, stream_id, recv, tx));
+    Ok(stream_id)
+}
+
+/// Why a connection failed, as one of the closed set of statuses.
+///
+/// A rejected certificate is its own status and not a generic failure: it is
+/// the one connect error an operator can act on — the till rotated its
+/// certificate and the device is holding the old hash — and burying it in a
+/// message nobody parses would send them to look at the network instead.
+fn connect_status(error: &wtransport::error::ConnectingError) -> Status {
+    let text = error.to_string().to_lowercase();
+    if text.contains("certificate") || text.contains("tls") || text.contains("handshake") {
+        Status::BadCertificate
+    } else {
+        Status::PeerGone
+    }
 }
 
 /// A taken port is its own status, not a generic bind failure.

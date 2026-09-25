@@ -27,6 +27,18 @@
 /// }
 /// ```
 ///
+/// ## Two halves since 0.3.0
+///
+/// [QuicServer] hosts an endpoint; [QuicClient] reaches one. They share the
+/// transport, the event vocabulary and the closed set of statuses, and that
+/// sharing is the point: a client and a server that disagreed about what
+/// `streamClosed` means would disagree on a live wire, not at the build.
+///
+/// A client trusts a certificate by its SHA-256 hash and by nothing else —
+/// the same rule a browser applies through `serverCertificateHashes`. There is
+/// no system-root-store option and no "trust anything" option, because an
+/// option that must never be used is an option that will be used.
+///
 /// ## In a browser
 ///
 /// Importing this package from code that is also compiled to web is safe:
@@ -53,6 +65,7 @@ export 'src/quic_event.dart'
         StreamMessageReceived,
         StreamOpened,
         UnknownQuicEvent;
+export 'src/client.dart' show QuicClient, QuicClientConfig, QuicClientConnect;
 export 'src/server.dart' show QuicServer, QuicServerConfig, QuicServerStart;
 export 'src/status.dart'
     show RkQuicStatus, RkQuicStatusName, statusFromWireName;

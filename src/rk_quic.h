@@ -146,6 +146,51 @@ const char *rk_quic_stream_send(uint64_t handle, uint64_t session_id,
 const char *rk_quic_stream_close(uint64_t handle, uint64_t session_id,
                                  uint64_t stream_id);
 
+/* ---- the client half, 0.3.0 --------------------------------------------- */
+
+/* Connects to a WebTransport endpoint.
+ *
+ * Only two entry points are added for a client, and that is the design rather
+ * than an economy: a connected client is registered as an endpoint with one
+ * session in it, so polling, writing into a stream, finishing one and stopping
+ * are rk_quic_server_poll, rk_quic_stream_send, rk_quic_stream_close and
+ * rk_quic_server_stop — unchanged, and identical on both sides. The "server"
+ * in those names is historical; renaming them would break every caller that
+ * already links them.
+ *
+ * config_json:
+ *   { "url": "https://host:port/path",
+ *     "certificateHashSha256": "<64 hex characters>",
+ *     "idleTimeoutMs": 30000 }
+ *
+ * The certificate is accepted by SHA-256 hash and by nothing else — the rule a
+ * browser applies through serverCertificateHashes. There is no root-store mode
+ * and no "trust anything" mode: an option that must never be used is an option
+ * that will be used.
+ *
+ * On "ok" both out_handle and out_session are written, and they are two
+ * separate numbers on purpose. They happen to be allocated consecutively
+ * today; that is an allocator detail, and a caller deriving one from the other
+ * would be relying on something nothing states.
+ *
+ * "badCertificate" means the server presented a certificate whose hash is not
+ * the one given — in practice, a till that rotated its certificate while the
+ * device held the old fingerprint. "peerGone" means nothing answered. */
+const char *rk_quic_client_connect(const char *config_json,
+                                   uint64_t *out_handle,
+                                   uint64_t *out_session);
+
+/* Opens a bidirectional stream on a session and writes its id.
+ *
+ * The client is the side that opens streams on this wire: it asks, and the
+ * host answers into the same stream. The id is the QUIC stream id, which both
+ * ends see identically — that is what lets an answer be addressed at all.
+ *
+ * "unknownHandle" means no such endpoint or no such session. "peerGone" means
+ * the session would not give a stream. */
+const char *rk_quic_client_open_stream(uint64_t handle, uint64_t session_id,
+                                       uint64_t *out_stream);
+
 #ifdef __cplusplus
 }
 #endif

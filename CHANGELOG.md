@@ -1,3 +1,41 @@
+## 0.3.0
+
+- **The client half.** `QuicClient` reaches an endpoint; `QuicServer` still
+  hosts one. Until now this package could only be connected *to*, and the only
+  client was a browser — which left a native device with no way in at all.
+- **Two new entry points and no more**: `rk_quic_client_connect` and
+  `rk_quic_client_open_stream`. A connected client is registered as an endpoint
+  with one session in it, so polling, writing into a stream, finishing one and
+  stopping are the calls that already existed. The `server` in those names is
+  historical; renaming them would break every caller that already links them.
+  This is not an economy — a client with its own registry, its own poll and its
+  own event names would be two vocabularies for one exchange, and they would
+  disagree on a live wire rather than at the build.
+- **A certificate is trusted by SHA-256 hash and by nothing else**, which is
+  the rule a browser applies through `serverCertificateHashes`. There is no
+  system-root-store option and no "trust anything" option: both exist in
+  `wtransport`, both are wrong for this endpoint, and an option that must never
+  be used is an option that will be used. A wrong hash is `badCertificate` —
+  its own status, because the mistake an operator actually makes is a stale
+  fingerprint after the host rotated its certificate, and burying that in a
+  message nobody parses sends them to look at the network instead.
+- `rk_quic_client_connect` writes **two** numbers, the handle and the session.
+  They are allocated consecutively today; that is an allocator detail, and a
+  caller deriving one from the other would rely on something nothing states.
+- The isolates, the poll loop and the reply-by-id matching moved to
+  `src/endpoint_io.dart`: both halves need every one of them, and a second copy
+  would be a second place to fix one defect — the defect that plumbing exists
+  to prevent went unnoticed for two versions the first time.
+- `test/client_to_server.rs` holds it: our client against our own server, the
+  exchange the wire actually uses (the peer opens a stream and asks, the host
+  answers **into that same stream**), plus a wrong hash refused by name. A test
+  against a third-party server would prove compatibility; what is at risk here
+  is symmetry, and only our two halves can fail that way.
+- Measured while writing it: creating the client endpoint outside the tokio
+  runtime panics with "there is no reactor running" rather than returning an
+  error — quinn registers its socket with the reactor at construction. The
+  endpoint is now built inside `block_on`, exactly as the server's is.
+
 ## 0.2.2
 
 - **Every call on `QuicServer` now gets its own reply, however many are in

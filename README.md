@@ -9,7 +9,39 @@ gets the right to speak first.** A change in the state of a print job, a device
 that appeared or failed, reaches a browser client at the moment of the event
 rather than the next time somebody asks.
 
-## What 0.2.1 can do
+## Two halves
+
+`QuicServer` hosts an endpoint. `QuicClient`, since 0.3.0, reaches one.
+
+```dart
+final attempt = await QuicClient.connect(
+  QuicClientConfig(
+    url: 'https://192.168.1.10:4433/wire',
+    // The only rule on offer, and the one a browser applies through
+    // `serverCertificateHashes`. There is no root-store mode and no
+    // "trust anything" mode.
+    certificateHashSha256: fingerprintTheHostPublished,
+  ),
+);
+if (!attempt.isConnected) {
+  // A value, never an exception: `badCertificate` means the host rotated its
+  // certificate while this device held the old fingerprint; `peerGone` means
+  // nothing answered.
+  return attempt.status;
+}
+
+final client = attempt.client!;
+final (status, stream) = await client.openStream();
+await client.sendOn(stream!, 'sale.ping');
+await client.closeStream(stream);          // the question is whole
+// The answer arrives on `client.events` as `streamData` with the same id.
+```
+
+The two share the transport, the event vocabulary and the closed set of
+statuses. That sharing is the point: halves that disagreed about what
+`streamClosed` means would disagree on a live wire, not at the build.
+
+## What 0.3.0 can do
 
 Serve WebTransport to a browser — and **speak first**. Since 0.2.0 an exchange
 can also be a bidirectional stream, so an answer can be told apart from the
@@ -61,7 +93,7 @@ a proven mechanism. An empty library has no reasons of its own to fail, so a red
 build meant a broken pipeline and nothing else.
 
 ```dart
-print(rkQuicVersion);       // 0.2.1 — read out of the loaded library
+print(rkQuicVersion);       // 0.3.0 — read out of the loaded library
 print(hasNativeTransport);  // true if it opened and the ABI generation agreed
 ```
 
